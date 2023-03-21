@@ -140,8 +140,8 @@ def create(ctx, verbosity):
     DATADIR.mkdir(parents=True, exist_ok=True)
     # DATADIR_ARCHIVE.mkdir(parents=True, exist_ok=True)
     # DATADIR_CONFIG.mkdir(parents=True, exist_ok=True)
-    (DATADIR / 'cache').mkdir(parents=True, exist_ok=True)
-    (DATADIR / 'metadata' / 'discovery').mkdir(parents=True, exist_ok=True)
+    # (DATADIR / 'cache').mkdir(parents=True, exist_ok=True)
+    # (DATADIR / 'metadata' / 'discovery').mkdir(parents=True, exist_ok=True)
     (DATADIR / 'metadata' / 'station').mkdir(parents=True, exist_ok=True)
 
 

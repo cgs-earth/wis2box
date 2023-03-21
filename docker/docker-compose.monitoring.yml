@@ -102,8 +102,8 @@ services:
     <<: *logging
   wis2box-api:
     <<: *logging
-  elasticsearch:
-    <<: *logging
+  # elasticsearch:
+  #   <<: *logging
   wis2box-auth:
     <<: *logging
   minio:

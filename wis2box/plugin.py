@@ -32,6 +32,9 @@ PLUGINS = {
     'api_backend': {
         'Elasticsearch': {
             'plugin': 'wis2box.api.backend.elastic.ElasticBackend'
+        },
+        'SensorThings': {
+            'plugin': 'wis2box.api.backend.sensorthings.SensorthingsBackend'
         }
     },
     'api_config': {
@@ -47,8 +50,8 @@ PLUGINS = {
     'storage': {
         'S3': {
             'plugin': 'wis2box.storage.minio.MinIOStorage'
-         }
-     }
+        }
+    }
 }
 
 

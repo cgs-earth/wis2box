@@ -27,6 +27,7 @@ import click
 from wis2box import cli_helpers
 from wis2box.api import (setup_collection, remove_collection,
                          delete_collections_by_retention)
+from wis2box.data.observation import observation
 from wis2box.env import (STORAGE_SOURCE, STORAGE_ARCHIVE, STORAGE_PUBLIC,
                          STORAGE_DATA_RETENTION_DAYS, STORAGE_INCOMING)
 from wis2box.handler import Handler
@@ -126,9 +127,9 @@ def gcm(mcf: dict) -> dict:
         'keywords': list(keywords),
         'bbox': bbox,
         'links': generated['links'],
-        'id_field': 'id',
+        'id_field': '@iot.id',
         'time_field': 'resultTime',
-        'title_field': 'id'
+        'title_field': 'name'
     }
 
 
@@ -253,3 +254,4 @@ data.add_command(ingest)
 data.add_command(add_collection)
 data.add_command(delete_collection)
 data.add_command(add_collection_items)
+data.add_command(observation)

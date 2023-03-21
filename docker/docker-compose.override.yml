@@ -18,3 +18,11 @@ services:
     ports:
       - 1883:1883
       - 8884:8884
+
+  frost-sta:
+    ports:
+      - 8080:8080
+
+  frost-mqtt:
+    ports:
+      - 9876:9876

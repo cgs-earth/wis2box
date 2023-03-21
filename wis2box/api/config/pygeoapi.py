@@ -32,6 +32,7 @@ LOGGER = logging.getLogger(__name__)
 
 class PygeoapiConfig(BaseConfig):
     """Abstract API config"""
+
     def __init__(self, defs: dict) -> None:
         """
         initializer
@@ -103,8 +104,9 @@ class PygeoapiConfig(BaseConfig):
 
         :returns: `dict` of collection configuration
         """
-
-        if meta['id'] in ['discovery-metadata', 'messages', 'stations']:
+        include_collections = ['discovery-metadata', 'messages', 'stations',
+                               'Things', 'Datastreams', 'Observations']
+        if meta['id'] in include_collections:
             resource_id = meta['id']
         else:
             resource_id = meta['topic_hierarchy']
@@ -135,12 +137,16 @@ class PygeoapiConfig(BaseConfig):
                 'data': f'{API_BACKEND_URL}/{resource_id}',
                 'id_field': meta.get('id_field'),
                 'time_field': meta.get('time_field'),
-                'title_field': meta.get('title_field')
+                'title_field': meta.get('title_field'),
+                'intralink': True
             }]
         }
 
         if meta.get('time_field') is None:
             collection['providers'][0].pop('time_field')
+
+        if meta.get('title_field') is None:
+            collection['providers'][0].pop('title_field')
 
         if meta.get('links') is not None:
             def make(link):

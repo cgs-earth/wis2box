@@ -13,7 +13,7 @@ services:
 
   wis2box-ui:
     container_name: wis2box-ui
-    image: ghcr.io/wmo-im/wis2box-ui:latest
+    image: ghcr.io/cgs-earth/hub2box-ui:latest
     env_file:
       - default.env
       - ../dev.env
@@ -22,13 +22,10 @@ services:
 
   wis2box-api:
     container_name: wis2box-api
-    image: ghcr.io/wmo-im/wis2box-api:latest
+    image: ghcr.io/cgs-earth/hub2box-api:latest
     env_file:
       - default.env
       - ../dev.env
-    depends_on:
-      elasticsearch:
-        condition: service_healthy
     volumes:
       - api-config:/data/wis2box/config/pygeoapi/:rw
 
@@ -53,33 +50,6 @@ services:
     depends_on:
       mosquitto:
         condition: service_started
-
-  elasticsearch:
-    container_name: elasticsearch
-    image: docker.elastic.co/elasticsearch/elasticsearch:7.16.2
-    environment:
-      - discovery.type=single-node
-      - node.name=elasticsearch-01
-      - discovery.seed_hosts=elasticsearch-01
-      - bootstrap.memory_lock=true
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-      - cluster.name=es-wis2box
-      - xpack.security.enabled=false
-    mem_limit: 1.5g
-    memswap_limit: 1.5g
-    volumes:
-      - es-data:/usr/share/elasticsearch/data:rw
-    # ulimits:
-    #   nofile:
-    #     soft: 524288
-    #     hard: 524288
-    #   memlock:
-    #     soft: -1
-    #     hard: -1
-    healthcheck:
-      test: ["CMD", "curl", "http://localhost:9200"]
-      interval: 5s
-      retries: 100
 
   mosquitto:
     container_name: mosquitto
@@ -126,8 +96,66 @@ services:
     depends_on:
       - wis2box
 
+  frost-sta:
+    container_name: frost-sta
+    image: fraunhoferiosb/frost-server-http:2.0
+    env_file:
+      - default.env
+      - ../dev.env
+    environment:
+      - queueLoggingInterval=1000
+      - plugins.multiDatastream.enable=true
+      - http_cors_enable=true
+      - http_cors_allowed_origins=*
+      - bus_mqttBroker=tcp://mosquitto:1883
+      - bus_sendQueueSize=2000
+      - bus_sendWorkerPoolSize=10
+      - bus_maxInFlight=2000
+      - persistence_db_driver=org.postgresql.Driver
+      - persistence_db_url=jdbc:postgresql://database:5432/sensorthings
+      - persistence_db_username=sensorthings
+      - persistence_db_password=ChangeMe
+      - persistence_idGenerationMode=ServerAndClientGenerated
+      - persistence_autoUpdateDatabase=true
+    depends_on:
+      - database
+      - mosquitto
+
+  frost-mqtt:
+    container_name: frost-mqtt
+    image: fraunhoferiosb/frost-server-mqtt:2.0
+    env_file:
+      - default.env
+      - ../dev.env
+    environment:
+      - queueLoggingInterval=1000
+      - plugins.multiDatastream.enable=true
+      - bus_busImplementationClass=de.fraunhofer.iosb.ilt.sta.messagebus.MqttMessageBus
+      - mqtt_CreateThreadPoolSize=10
+      - mqtt_CreateMessageQueueSize=10000
+      - mqtt_SubscribeThreadPoolSize=20
+      - mqtt_SubscribeMessageQueueSize=10000
+      - persistence_persistenceManagerImplementationClass=de.fraunhofer.iosb.ilt.sta.persistence.postgres.PostgresPersistenceManager
+      - persistence_db_driver=org.postgresql.Driver
+      - persistence_db_url=jdbc:postgresql://database:5432/sensorthings
+      - persistence_db_username=sensorthings
+      - persistence_db_password=ChangeMe
+    depends_on:
+      - database
+      - mosquitto
+
+  database:
+    container_name: database
+    image: postgis/postgis:14-3.2-alpine
+    environment:
+      - POSTGRES_DB=sensorthings
+      - POSTGRES_USER=sensorthings
+      - POSTGRES_PASSWORD=ChangeMe
+    volumes:
+      - postgis_volume:/var/lib/postgresql/data
+
 volumes:
-  es-data:
   minio-data:
   auth-data:
   api-config:
+  postgis_volume:
