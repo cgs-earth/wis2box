@@ -52,7 +52,7 @@ wis2box data observation publish-collection
 Ingest some csv files:
 
 ```
-wis2box data observation ingest -th iow.demo.Observations -b 2022-12-31T
+wis2box data observation ingest -b 2022-12-31T
 ```
 
 Please consult the [documentation](https://docs.wis2box.wis.wmo.int) for installing

@@ -24,7 +24,8 @@ import csv
 import logging
 
 from wis2box import cli_helpers
-from wis2box.api import setup_collection, upsert_collection_item
+from wis2box.api import (setup_collection, upsert_collection_item,
+                         delete_collection_item)
 from wis2box.env import DATADIR
 from wis2box.metadata.datastream import load_datastreams
 from wis2box.util import get_typed_value
@@ -33,6 +34,7 @@ LOGGER = logging.getLogger(__name__)
 
 STATION_METADATA = DATADIR / 'metadata' / 'station'
 STATIONS = STATION_METADATA / 'station_list.csv'
+THINGS = 'Things'
 
 
 def gcm() -> dict:
@@ -43,8 +45,8 @@ def gcm() -> dict:
     """
 
     return {
-        'id': 'Things',
-        'title': 'Things',
+        'id': THINGS,
+        'title': THINGS,
         'description': 'SensorThings API Things',
         'keywords': ['thing', 'dam'],
         'links': ['https://data.usbr.gov/rise-api'],
@@ -96,7 +98,7 @@ def publish_station_collection() -> None:
             }
 
             LOGGER.debug('Publishing to backend')
-            upsert_collection_item('Things', feature)
+            upsert_collection_item(THINGS, feature)
 
     return
 
@@ -111,4 +113,20 @@ def publish_collection(ctx, verbosity):
     click.echo('Done')
 
 
+@click.command()
+@click.pass_context
+@cli_helpers.OPTION_VERBOSITY
+def delete_collection(ctx, verbosity):
+    """Publishes collection of stations to API config and backend"""
+
+    with STATIONS.open() as fh:
+        reader = csv.DictReader(fh)
+
+        for row in reader:
+            delete_collection_item(THINGS, row['station_identifier'])
+
+    click.echo('Done')
+
+
 thing.add_command(publish_collection)
+thing.add_command(delete_collection)

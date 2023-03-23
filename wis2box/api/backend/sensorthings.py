@@ -48,11 +48,11 @@ class SensorthingsBackend(BaseBackend):
 
     def sta_id(self, collection_id: str) -> Tuple[str]:
         """
-        Make collection_id ES friendly
+        Make collection_id STA friendly
 
         :param collection_id: `str` name of collection
 
-        :returns: `str` of ES index
+        :returns: `str` of STA index
         """
         return self.url + '/' + collection_id.split('.').pop()
 
@@ -99,6 +99,27 @@ class SensorthingsBackend(BaseBackend):
 
         for entity in items:
             self.http.post(sta_index, json.dumps(entity))
+
+    def delete_collection_item(self, collection_id: str, item_id: str) -> str:
+        """
+        Delete an item from a collection
+
+        :param collection_id: name of collection
+        :param item_id: `str` of item identifier
+
+        :returns: `bool` of delete result
+        """
+
+        LOGGER.debug(f'Deleting {item_id} from {collection_id}')
+        sta_index = self.sta_id(collection_id)
+        try:
+            self.http.delete(f'{sta_index}({item_id})')
+        except Exception as err:
+            msg = f'Item deletion failed: {err}'
+            LOGGER.error(msg)
+            return False
+
+        return True
 
     def __repr__(self):
         return f'<SensorthingsBackend> (url={self.url})'

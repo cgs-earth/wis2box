@@ -31,7 +31,7 @@ from typing import Union
 from wis2box import cli_helpers
 from wis2box.api import setup_collection
 from wis2box.data.base import BaseAbstractData
-from wis2box.env import DATADIR, DOCKER_API_URL, STORAGE_INCOMING
+from wis2box.env import DATADIR, DOCKER_API_URL, STORAGE_PUBLIC
 from wis2box.storage import put_data
 from wis2box.topic_hierarchy import validate_and_load
 
@@ -136,10 +136,15 @@ class ObservationDataDownload(BaseAbstractData):
             'itemId': input_data,
             'filename': f'{rmk}.csv'
         }
-        path = f'{STORAGE_INCOMING}/{self.local_filepath(self.end)}/{rmk}.csv'
         data = self._get_response(USBR_URL, params)
-        put_data(data, path)
-        LOGGER.debug('Finished processing subset')
+        bytes = self.as_bytes(data)
+
+        if 'No data' in str(bytes):
+            LOGGER.warning(f'No data for {rmk}')
+        else:
+            path = f'{STORAGE_PUBLIC}/{self.local_filepath(self.end)}/{rmk}.csv'  # noqa
+            put_data(data, path)
+            LOGGER.debug('Finished processing subset')
 
     def local_filepath(self, date_):
         yyyymmdd = date_[0:10]  # date_.strftime('%Y-%m-%d')
@@ -167,14 +172,14 @@ def publish_collection(ctx, verbosity):
 
 @click.command()
 @click.pass_context
-@cli_helpers.OPTION_TOPIC_HIERARCHY
-@click.option('--station', '-s', default='*', help='station id to broker')
+@click.option('--station', '-s', default='*', help='station identifier')
 @click.option('--begin', '-b', help='data start date')
 @click.option('--end', '-e', help='data end date')
 @cli_helpers.OPTION_VERBOSITY
-def ingest(ctx, topic_hierarchy, station, begin, end, verbosity):
+def ingest(ctx, station, begin, end, verbosity):
     """Ingest all data from a station"""
-    _, plugins = validate_and_load(topic_hierarchy)
+    click.echo('Ingesting observations')
+    _, plugins = validate_and_load('iow.demo.Observations')
     [plugin] = [p for p in plugins if isinstance(p, ObservationDataDownload)]
     if begin:
         plugin.set_date(begin=begin)

@@ -28,6 +28,9 @@ services:
       - ../dev.env
     volumes:
       - api-config:/data/wis2box/config/pygeoapi/:rw
+    depends_on:
+      frost-sta:
+        condition: service_started
 
   minio:
     container_name: wis2box-minio
