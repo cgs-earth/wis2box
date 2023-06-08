@@ -117,12 +117,12 @@
           "exemplar": true,
           "expr": "delta(wis2box_storage_incoming_total{}[$__interval])",
           "interval": "1m",
-          "legendFormat": "New/updated files per hour in wis2box-incoming",
+          "legendFormat": "New/updated files per hour in hub2box-incoming",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "New/updated files in wis2box-incoming storage",
+      "title": "New/updated files in hub2box-incoming storage",
       "type": "timeseries"
     },
     {
@@ -252,12 +252,12 @@
           "exemplar": true,
           "expr": "delta(wis2box_storage_public_total{}[$__interval])",
           "interval": "1m",
-          "legendFormat": "New/updated files in wis2box-public",
+          "legendFormat": "New/updated files in hub2box-public",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "New/updated files in wis2box-public storage",
+      "title": "New/updated files in hub2box-public storage",
       "type": "timeseries"
     },
     {

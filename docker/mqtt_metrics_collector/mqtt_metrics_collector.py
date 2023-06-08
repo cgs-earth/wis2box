@@ -117,9 +117,9 @@ def sub_mqtt_metrics(client, userdata, msg):
         failure_total.inc(1)
 
     if str(msg.topic).startswith('wis2box-storage'):
-        if str(m["Key"]).startswith('wis2box-incoming'):
+        if str(m["Key"]).startswith('hub2box-incoming'):
             storage_incoming_total.inc(1)
-        if str(m["Key"]).startswith('wis2box-public'):
+        if str(m["Key"]).startswith('hub2box-public'):
             storage_public_total.inc(1)
 
 

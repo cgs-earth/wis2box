@@ -1,9 +1,7 @@
-elasticsearch<8
 isodate
 minio
 OWSLib
 paho-mqtt
 pygeometa
-pywis-pubsub
 PyYAML
 requests
