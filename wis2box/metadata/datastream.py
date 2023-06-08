@@ -29,6 +29,7 @@ from wis2box.api import setup_collection
 LOGGER = logging.getLogger(__name__)
 
 USBR_URL = 'https://data.usbr.gov'
+RISE_URL = f'{USBR_URL}/rise/api'
 
 
 def gcm() -> dict:
@@ -59,7 +60,7 @@ def fetch_datastreams(station_id: str):
     http = Session()
     http.headers.update({'accept': 'application/vnd.api+json'})
 
-    location = http.get(f'{USBR_URL}/rise/api/location/{station_id}').json()
+    location = http.get(f'{RISE_URL}/location/{station_id}').json()
 
     return location['data']['relationships']['catalogItems']['data']
 
@@ -79,6 +80,9 @@ def yield_datastreams(datasets: dict) -> list:
             'name': attrs['itemTitle'],
             'description': attrs['itemDescription'],
             'observationType': 'http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement',  # noqa
+            'properties': {
+                'RISE.selfLink': USBR_URL + dataset['id']
+            },
             'unitOfMeasurement': {
                 'name': attrs['parameterUnit'],
                 'symbol': attrs['parameterUnit'],

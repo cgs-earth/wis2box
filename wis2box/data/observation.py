@@ -31,7 +31,7 @@ from typing import Union
 from wis2box import cli_helpers
 from wis2box.api import setup_collection
 from wis2box.data.base import BaseAbstractData
-from wis2box.env import DATADIR, DOCKER_API_URL, STORAGE_PUBLIC
+from wis2box.env import DATADIR, DOCKER_API_URL, STORAGE_INCOMING
 from wis2box.storage import put_data
 from wis2box.topic_hierarchy import validate_and_load
 
@@ -40,7 +40,7 @@ LOGGER = logging.getLogger(__name__)
 USBR_URL = 'https://data.usbr.gov/rise/api/result/download'
 
 STATION_METADATA = DATADIR / 'metadata' / 'station'
-STATIONS = STATION_METADATA / 'station_list.csv'
+STATIONS = STATION_METADATA / 'location_data.csv'
 
 
 def gcm() -> dict:
@@ -119,7 +119,7 @@ class ObservationDataDownload(BaseAbstractData):
             except JSONDecodeError:
                 response = r.content
         else:
-            msg = 'Bad http response code'
+            msg = f'Bad http response code: {r.url}'
             LOGGER.error(msg)
             raise RequestException(msg)
 
@@ -142,7 +142,7 @@ class ObservationDataDownload(BaseAbstractData):
         if 'No data' in str(bytes):
             LOGGER.warning(f'No data for {rmk}')
         else:
-            path = f'{STORAGE_PUBLIC}/{self.local_filepath(self.end)}/{rmk}.csv'  # noqa
+            path = f'{STORAGE_INCOMING}/{self.local_filepath(self.end)}/{rmk}.csv'  # noqa
             put_data(data, path)
             LOGGER.debug('Finished processing subset')
 
@@ -152,6 +152,33 @@ class ObservationDataDownload(BaseAbstractData):
 
     def __repr__(self):
         return '<ObservationDataDownload>'
+
+
+def sync_datastreams(station_id, begin, end):
+    url = DOCKER_API_URL + '/collections/datastreams/items'
+
+    _, plugins = validate_and_load('iow.demo.Observations')
+    [plugin] = [p for p in plugins
+                if isinstance(p, ObservationDataDownload)]
+
+    if begin:
+        plugin.set_date(begin=begin)
+    if end:
+        plugin.set_date(end=end)
+
+    params = {'Thing': station_id, 'resulttype': 'hits'}
+    response = plugin._get_response(url=url, params=params)
+    hits = response.get('numberMatched', 10000)
+
+    params = {'Thing': station_id, 'limit': hits}
+    datastreams = plugin._get_response(url=url, params=params)
+
+    for datastream in datastreams['features']:
+        try:
+            plugin.transform(datastream['id'], datastream['id'])
+        except Exception as err:
+            LOGGER.error(datastream['id'])
+            LOGGER.error(err)
 
 
 @click.group()
@@ -179,28 +206,18 @@ def publish_collection(ctx, verbosity):
 def ingest(ctx, station, begin, end, verbosity):
     """Ingest all data from a station"""
     click.echo('Ingesting observations')
-    _, plugins = validate_and_load('iow.demo.Observations')
-    [plugin] = [p for p in plugins if isinstance(p, ObservationDataDownload)]
-    if begin:
-        plugin.set_date(begin=begin)
-    if end:
-        plugin.set_date(end=end)
-
-    def sync_datastreams(station_id):
-        params = {'Thing': station_id}
-        _ = DOCKER_API_URL + '/collections/datastreams/items'
-        datastreams = plugin._get_response(url=_, params=params)
-
-        for datastream in datastreams['features']:
-            plugin.transform(datastream['id'], datastream['id'])
 
     if station == '*':
         with STATIONS.open() as fh:
             reader = csv.DictReader(fh)
             for row in reader:
-                sync_datastreams(station_id=row['station_identifier'])
+                station = row['station_identifier']
+                try:
+                    sync_datastreams(station, begin, end)
+                except Exception as err:
+                    click.echo(f'{err} with {station}')
     else:
-        sync_datastreams(station_id=station)
+        sync_datastreams(station, begin, end)
 
     click.echo('Done')
 

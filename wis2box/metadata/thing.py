@@ -33,8 +33,11 @@ from wis2box.util import get_typed_value
 LOGGER = logging.getLogger(__name__)
 
 STATION_METADATA = DATADIR / 'metadata' / 'station'
-STATIONS = STATION_METADATA / 'station_list.csv'
+STATIONS = STATION_METADATA / 'location_data.csv'
 THINGS = 'Things'
+
+USBR_URL = 'https://data.usbr.gov'
+RISE_URL = f'{USBR_URL}/rise/api'
 
 
 def gcm() -> dict:
@@ -76,7 +79,11 @@ def publish_station_collection() -> None:
 
         for row in reader:
             station_identifier = row['station_identifier']
-            datastreams = load_datastreams(station_identifier)
+            try:
+                datastreams = load_datastreams(station_identifier)
+            except Exception:
+                LOGGER.error(station_identifier)
+                continue
             feature = {
                 '@iot.id': station_identifier,
                 'name': row['station_name'],
@@ -94,7 +101,10 @@ def publish_station_collection() -> None:
                         ]}
                 }],
                 'Datastreams': list(datastreams),
-                'properties': {**row},
+                'properties': {
+                    'RISE.selfLink': f'{RISE_URL}/location/{station_identifier}', # noqa
+                    **row
+                }
             }
 
             LOGGER.debug('Publishing to backend')
