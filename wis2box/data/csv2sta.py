@@ -75,6 +75,11 @@ class ObservationDataCSV(ObservationDataGeoJSON):
             data_date = isodate.strftime('%Y-%m-%dT%H:%M:%SZ')
             isodate = isodate.strftime('%Y%m%dT%H%M%S')
 
+            try:
+                result = float(data_dict['Result'])
+            except ValueError:
+                result = data_dict['Result']
+
             identifier = f'{datastream}_{isodate}'
             LOGGER.debug(f'Publishing with ID {identifier}')
             self.output_data[identifier] = {
@@ -86,7 +91,7 @@ class ObservationDataCSV(ObservationDataGeoJSON):
                 'geojson': {
                     'phenomenonTime': data_date,
                     'resultTime': data_date,
-                    'result': data_dict.get('Result'),
+                    'result': result,
                     'Datastream': {'@iot.id': datastream},
                     'FeatureOfInterest': {
                         '@iot.id': datastream,
