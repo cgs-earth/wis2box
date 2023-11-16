@@ -22,25 +22,22 @@
 import click
 import csv
 from datetime import datetime, timedelta
+from io import BytesIO, TextIOWrapper
 from json.decoder import JSONDecodeError
 import logging
 from pathlib import Path
 from requests import Session, RequestException
 from typing import Union
+from zipfile import ZipFile
 
 from wis2box import cli_helpers
 from wis2box.api import setup_collection
 from wis2box.data.base import BaseAbstractData
-from wis2box.env import DATADIR, DOCKER_API_URL, STORAGE_INCOMING
+from wis2box.env import (STORAGE_INCOMING, WQP_URL, STATIONS, RESULTS_URL)
 from wis2box.storage import put_data
 from wis2box.topic_hierarchy import validate_and_load
 
 LOGGER = logging.getLogger(__name__)
-
-USBR_URL = 'https://data.usbr.gov/rise/api/result/download'
-
-STATION_METADATA = DATADIR / 'metadata' / 'station'
-STATIONS = STATION_METADATA / 'location_data.csv'
 
 
 def gcm() -> dict:
@@ -54,8 +51,8 @@ def gcm() -> dict:
         'id': 'Observations',
         'title': 'Observations',
         'description': 'SensorThings API Observations',
-        'keywords': ['observation', 'dam'],
-        'links': ['https://data.usbr.gov/rise-api'],
+        'keywords': ['observation', 'wqp'],
+        'links': [WQP_URL],
         'bbox': [-180, -90, 180, 90],
         'time_field': 'resultTime',
         'id_field': '@iot.id'
@@ -81,11 +78,11 @@ class ObservationDataDownload(BaseAbstractData):
 
     @property
     def begin(self):
-        return self._begin.strftime('%Y-%m-%dT')
+        return self._begin.strftime('%m-%d-%Y')
 
     @property
     def end(self):
-        return self._end.strftime('%Y-%m-%dT')
+        return self._end.strftime('%m-%d-%Y')
 
     def set_date(self, begin: str = '', end: str = '') -> None:
         """
@@ -112,7 +109,6 @@ class ObservationDataDownload(BaseAbstractData):
         :returns: STA response
         """
         r = self.http.get(url, params=params)
-
         if r.ok:
             try:
                 response = r.json()
@@ -129,21 +125,27 @@ class ObservationDataDownload(BaseAbstractData):
         self, input_data: Union[Path, bytes], filename: str = ''
     ) -> bool:
         rmk = f'{input_data}_{self.begin}_{self.end}'
-        params = {
-            'type': 'csv',
-            'after': self.begin,
-            'before': self.end,
-            'itemId': input_data,
-            'filename': f'{rmk}.csv'
-        }
-        data = self._get_response(USBR_URL, params)
-        bytes = self.as_bytes(data)
 
-        if 'No data' in str(bytes):
+        params = {
+            'zip': 'yes',
+            'siteid': input_data,
+            'mimeType': 'csv',
+            'startDateLo': self.begin,
+            'startDateHi': self.end,
+            'dataProfile': 'resultPhysChem'
+        }
+        response = self._get_response(RESULTS_URL, params)
+        zipfiles = ZipFile(BytesIO(response))
+        [zipfile] = zipfiles.namelist()
+        with zipfiles.open(zipfile) as fh:
+            data = TextIOWrapper(fh, 'utf-8').read()
+            bytes = self.as_bytes(data)
+
+        if len(bytes) <= 2278:
             LOGGER.warning(f'No data for {rmk}')
         else:
             path = f'{STORAGE_INCOMING}/{self.local_filepath(self.end)}/{rmk}.csv'  # noqa
-            put_data(data, path)
+            put_data(bytes, path)
             LOGGER.debug('Finished processing subset')
 
     def local_filepath(self, date_):
@@ -155,8 +157,6 @@ class ObservationDataDownload(BaseAbstractData):
 
 
 def sync_datastreams(station_id, begin, end):
-    url = DOCKER_API_URL + '/collections/datastreams/items'
-
     _, plugins = validate_and_load('iow.demo.Observations')
     [plugin] = [p for p in plugins
                 if isinstance(p, ObservationDataDownload)]
@@ -166,19 +166,11 @@ def sync_datastreams(station_id, begin, end):
     if end:
         plugin.set_date(end=end)
 
-    params = {'Thing': station_id, 'resulttype': 'hits'}
-    response = plugin._get_response(url=url, params=params)
-    hits = response.get('numberMatched', 10000)
-
-    params = {'Thing': station_id, 'limit': hits}
-    datastreams = plugin._get_response(url=url, params=params)
-
-    for datastream in datastreams['features']:
-        try:
-            plugin.transform(datastream['id'], datastream['id'])
-        except Exception as err:
-            LOGGER.error(datastream['id'])
-            LOGGER.error(err)
+    try:
+        plugin.transform(station_id)
+    except Exception as err:
+        LOGGER.error(station_id)
+        LOGGER.error(err)
 
 
 @click.group()
@@ -211,7 +203,7 @@ def ingest(ctx, station, begin, end, verbosity):
         with STATIONS.open() as fh:
             reader = csv.DictReader(fh)
             for row in reader:
-                station = row['station_identifier']
+                station = row['MonitoringLocationIdentifier']
                 try:
                     sync_datastreams(station, begin, end)
                 except Exception as err:

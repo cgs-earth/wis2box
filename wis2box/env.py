@@ -28,6 +28,7 @@ from wis2box import cli_helpers
 from wis2box.log import setup_logger
 from wis2box.plugin import load_plugin
 from wis2box.plugin import PLUGINS
+from wis2box.util import url_join
 
 LOGGER = logging.getLogger(__name__)
 
@@ -88,6 +89,15 @@ required_environment_variables = [
     STORAGE_INCOMING,
     STORAGE_PUBLIC
 ]
+
+STATION_METADATA = DATADIR / 'metadata' / 'station'
+STATIONS = STATION_METADATA / 'wqx_stations.csv'
+THINGS = 'Things'
+
+GEOCONNEX = 'https://geoconnex.us/'
+WQP_URL = 'https://www.waterqualitydata.us'
+STATION_URL = url_join(WQP_URL, 'data/Station/search')
+RESULTS_URL = url_join(WQP_URL, 'data/Result/search')
 
 for rev in required_environment_variables:
     if rev is None:

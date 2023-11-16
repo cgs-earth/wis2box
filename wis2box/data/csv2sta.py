@@ -19,15 +19,16 @@
 #
 ###############################################################################
 
-import csv
+from csv import DictReader
 from datetime import datetime
+from pytz import timezone
 from io import StringIO
-import json
 import logging
 from pathlib import Path
 from typing import Union
 
 from wis2box.data.geojson import ObservationDataGeoJSON
+from wis2box.util import make_uuid
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,69 +43,96 @@ class ObservationDataCSV(ObservationDataGeoJSON):
         input_bytes = self.as_bytes(input_data)
 
         fh = StringIO(input_bytes.decode())
-        reader = csv.reader(fh, delimiter=',', quoting=csv.QUOTE_NONNUMERIC)
-
-        # read in header rows
-        rows_read = 0
-        skip = 7
-        while rows_read <= skip:
-            row = next(reader)
-            if rows_read == 3:
-                loc_names = row
-            elif rows_read == 4:
-                loc = row
-            elif rows_read == skip:
-                col_names = row
-            rows_read += 1
-
-        location = dict(zip(loc_names, loc))
-        location['Coordinates'] = location.get('Coordinates (long, lat)', loc[2])  # noqa
-        location['Coordinates'] = location['Coordinates'].replace('(', '[')
-        location['Coordinates'] = location['Coordinates'].replace(')', ']')
-        LOGGER.debug(location['Coordinates'])
-        location['Coordinates'] = json.loads(location['Coordinates'])
-        LOGGER.debug('Processing data from ' + location['Location'])
+        reader = DictReader(fh)
 
         for row in reader:
-            data_dict = dict(zip(col_names, row))
+            identifier = row['ResultIdentifier']
+            unitOfMeasurement = row['ResultMeasure/MeasureUnitCode'] or row['DetectionQuantitationLimitMeasure/MeasureUnitCode']  # noqa
+            datastream = make_uuid(f"{row['CharacteristicName']}-{row['MonitoringLocationIdentifier']}-{unitOfMeasurement}")  # noqa
 
-            datastream = filename.split('_').pop(0)
+            _ = f"{row['ActivityStartDate']} {row['ActivityStartTime/Time']}"
             isodate = datetime.strptime(
-                data_dict.get('Datetime (UTC)'), '%Y-%m-%d %H:%M:%S'
-            )
-            data_date = isodate.strftime('%Y-%m-%dT%H:%M:%SZ')
+                _, '%Y-%m-%d %H:%M:%S'
+            ).replace(tzinfo=timezone(row['ActivityStartTime/TimeZoneCode']))
+            rowdate = isodate.strftime('%Y-%m-%dT%H:%M:%SZ')
             isodate = isodate.strftime('%Y%m%dT%H%M%S')
 
+            LongitudeMeasure = row['ActivityLocation/LongitudeMeasure'] # noqa
+            LatitudeMeasure = row['ActivityLocation/LatitudeMeasure'] # noqa
             try:
-                result = float(data_dict['Result'])
+                result = float(row['ResultMeasureValue'])
             except ValueError:
-                result = data_dict['Result']
+                result = row['ResultDetectionConditionText']
 
-            identifier = f'{datastream}_{isodate}'
+            if not result:
+                LOGGER.warning(f'No results for {identifier}')
+                continue
+
+            resultQuality = (row['MeasureQualifierCode'] or row['ResultStatusIdentifier']) or ' '.join([  # noqa
+                row['ResultDetectionQuantitationLimitUrl'],
+                row['DetectionQuantitationLimitMeasure/MeasureValue'],
+                row['DetectionQuantitationLimitMeasure/MeasureUnitCode']
+            ])
             LOGGER.debug(f'Publishing with ID {identifier}')
             self.output_data[identifier] = {
                 '_meta': {
                     'identifier': identifier,
-                    'data_date': data_date,
-                    'relative_filepath': self.get_local_filepath(data_date)
+                    'rowdate': rowdate,
+                    'relative_filepath': self.get_local_filepath(rowdate)
                 },
                 'geojson': {
-                    'phenomenonTime': data_date,
-                    'resultTime': data_date,
+                    'phenomenonTime': rowdate,
+                    'resultTime': rowdate,
                     'result': result,
+                    'resultQuality': resultQuality,
+                    'parameters': {
+                        'ResultCommentText': row['ResultCommentText'],
+                        'HydrologicCondition': row['HydrologicCondition'],
+                        'HydrologicEvent': row['HydrologicEvent']
+                    },
                     'Datastream': {'@iot.id': datastream},
                     'FeatureOfInterest': {
                         '@iot.id': datastream,
-                        'name': location.get('Location'),
-                        'description': data_dict.get('Parameter'),
+                        'name': row['MonitoringLocationName'],
+                        'description': row['MonitoringLocationName'],
                         'encodingType': 'application/vnd.geo+json',
                         'feature': {
                             'type': 'Point',
-                            'coordinates': location['Coordinates']
-                        }
+                            'coordinates': [LongitudeMeasure, LatitudeMeasure]
+                        },
                     },
                 }
             }
+
+            try:
+                depth = float(row['ActivityDepthHeightMeasure/MeasureValue'])
+                LOGGER.info('Adding samplings')
+                featureOfInterest = self.output_data[identifier]['geojson']['FeatureOfInterest']  # noqa
+                featureOfInterest['Samplings'] = [{
+                    'name': row['ActivityTypeCode'],
+                    'description': row['ActivityTypeCode'] + row['ActivityRelativeDepthName'],  # noqa
+                    'atDepth': depth,  # noqa
+                    'depthUom': row['ActivityDepthHeightMeasure/MeasureUnitCode'],  # noqa
+                    'encodingType': 'application/vnd.geo+json',
+                    'samplingLocation': {
+                        'type': 'Point',
+                        'coordinates': [LongitudeMeasure, LatitudeMeasure]
+                    },
+                    'Thing': {
+                        '@iot.id': row['MonitoringLocationIdentifier']
+                    },
+                    'Sampler': {
+                        'name': row['OrganizationFormalName'],
+                        'SamplingProcedure': {
+                            'name': row['ActivityTypeCode']
+                        }
+                    },
+                    'SamplingProcedure': {
+                        'name': row['ActivityTypeCode']
+                    }
+                }]
+            except (TypeError, ValueError):
+                LOGGER.info('No Sampling detected')
 
     def __repr__(self):
         return '<ObservationDataCSV>'
