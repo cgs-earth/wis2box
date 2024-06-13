@@ -125,6 +125,10 @@ class SensorthingsBackend(BaseBackend):
         LOGGER.debug(f'Deleting {item_id} from {collection_id}')
         sta_index = self.sta_id(collection_id)
         try:
+            item_id = int(item_id)
+        except ValueError:
+            item_id = f"'{item_id}'"
+        try:
             self.http.delete(f'{sta_index}({item_id})')
         except Exception as err:
             msg = f'Item deletion failed: {err}'
