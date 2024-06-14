@@ -21,15 +21,18 @@
 
 import click
 from csv import DictReader
+from datetime import datetime
 from io import StringIO
 import logging
+from pytz import timezone
 import re
 from requests import Session
+from typing import Iterable
 
 
 from wis2box import cli_helpers
 from wis2box.api import setup_collection
-from wis2box.env import RESULTS_URL, WQP_URL
+from wis2box.env import RESULTS_URL, WQP_URL, NLDI_URL
 from wis2box.resources.code_mapping import MAPPING
 from wis2box.util import make_uuid, url_join
 
@@ -87,30 +90,108 @@ def fetch_datastreams(station_id: str):
     return datastreams
 
 
-def yield_datastreams(datasets: dict) -> list:
+def yield_datastreams(station_identifier: str,
+                      datasets: dict) -> Iterable:
     """
     Yield datasets from USBR RISE API
 
-    :returns: `list`, of link relations for all datasets
+    :returns: `Iterable`, of link relations for all datasets
     """
+    http = Session()
+
     for id, dataset in datasets.items():
+        kwargs = {}
+        monitoring_location_identifier = \
+            dataset['MonitoringLocationIdentifier']
+        url = url_join(NLDI_URL, monitoring_location_identifier)
+        try:
+            result = http.get(url)
+            feature = result.json()['features'][0]
+            mainstem = http.get(feature['properties']['mainstem']).json()
+            kwargs['UltimateFeatureOfInterest'] = {
+                '@iot.id': make_uuid(feature['properties']['mainstem']),
+                'name': mainstem['properties']['name_at_outlet'],
+                'description': mainstem['properties']['name_at_outlet'],
+                'encodingType': 'application/geo+json',
+                'feature': mainstem['geometry'],
+                'properties': {
+                    'uri': feature['properties']['mainstem']
+                }
+            }
+        except KeyError:
+            LOGGER.info(f'Could not discover {monitoring_location_identifier}')
+            continue
+
+        sensor_kwargs = {}
+        sensor_name = ' '.join([
+            dataset['ResultAnalyticalMethod/MethodName'],
+            'applied', 'by', dataset['OrganizationFormalName']])
         sensor_ResultAnalyticalMethodMethodIdentifier = dataset[
             'ResultAnalyticalMethod/MethodIdentifier']
         sensor_ResultAnalyticalMethodMethodIdentifierContext = dataset[
             'ResultAnalyticalMethod/MethodIdentifierContext']
         if sensor_ResultAnalyticalMethodMethodIdentifier and sensor_ResultAnalyticalMethodMethodIdentifierContext:  # noqa
             sensor_identifier = f"{sensor_ResultAnalyticalMethodMethodIdentifierContext}-{sensor_ResultAnalyticalMethodMethodIdentifier}"  # noqa
-            sensor_description = dataset[
-                'ResultAnalyticalMethod/MethodDescriptionText']
+            sensor_description = ' '.join([
+                dataset['ResultAnalyticalMethod/MethodName'],
+                'applied', 'by', dataset['OrganizationFormalName'],
+                'analyzed', 'by', dataset['LaboratoryName']])
         else:
             sensor_identifier = f"{dataset['SampleCollectionMethod/MethodIdentifierContext'] or dataset['OrganizationIdentifier']}-{dataset['SampleCollectionMethod/MethodIdentifier']}"  # noqa
-            sensor_description = dataset[
-                'SampleCollectionMethod/MethodDescriptionText']
+            sensor_description = ' '.join([
+                dataset['SampleCollectionMethod/MethodName'],
+                'applied', 'by', dataset['OrganizationFormalName'],
+                'analyzed', 'by', dataset['LaboratoryName']])
 
-        observed_property_name = ' '.join([dataset['ResultSampleFractionText'],
-                                          dataset['CharacteristicName'],
-                                          dataset['MethodSpeciationName']]
-                                          ).strip()
+        observed_property_name = ' '.join([
+            dataset['ResultSampleFractionText'],
+            dataset['CharacteristicName'],
+            dataset['MethodSpeciationName']
+        ]).strip()
+
+        observing_procedure_id = '-'.join([
+            dataset['ResultAnalyticalMethod/MethodIdentifierContext'],
+            dataset['ResultAnalyticalMethod/MethodIdentifier']])
+
+        deployment_info = dataset['ActivityTypeCode'] in (
+            'Field Msr/Obs-Portable Data Logger', 'Field Msr/Obs')
+        if deployment_info:
+            _ = ' '.join([dataset['ActivityStartDate'],
+                          dataset['ActivityStartTime/Time']])
+            try:
+                isodate = datetime.strptime(_, '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                isodate = datetime.strptime(_, '%Y-%m-%d ')
+            try:
+                isodate = isodate.replace(
+                    tzinfo=timezone(dataset['ActivityStartTime/TimeZoneCode']))
+            except Exception:
+                LOGGER.info('Could not apply time zone information')
+            deployment_ActivityStartTime = isodate.strftime(
+                '%Y-%m-%dT%H:%M:%SZ')
+            deployment_description = ' '.join([
+                dataset['OrganizationFormalName'],
+                dataset['ActivityTypeCode'], 'at',
+                dataset['MonitoringLocationName'], 'at',
+                dataset['ActivityStartDate']
+            ])
+            deployment_id = '-'.join([dataset['ActivityIdentifier'],
+                                      dataset['MonitoringLocationIdentifier']])
+            sensor_kwargs['Deployments'] = [{
+                '@iot.id': make_uuid(deployment_id),
+                'name': deployment_id,
+                'deploymentTime': deployment_ActivityStartTime,
+                'depthUom': dataset['ActivityDepthHeightMeasure/MeasureUnitCode'], # noqa
+                'description': deployment_description,
+                'reason': dataset['ProjectName'],
+                'Host': {'@iot.id': station_identifier},
+                'properties': {
+                    'orgName': dataset['OrganizationFormalName']
+                }
+            }]
+            if dataset['ActivityDepthHeightMeasure/MeasureValue']:
+                sensor_kwargs['Deployments'][0]['atDepth'] = \
+                    dataset['ActivityDepthHeightMeasure/MeasureValue']
 
         observed_property_definition = ''
         _url = 'https://cdxapps.epa.gov/oms-substance-registry-services/substance-details'  # noqa
@@ -129,7 +210,6 @@ def yield_datastreams(datasets: dict) -> list:
                     break
                 except KeyError:
                     continue
-
         unitOfMeasurement = dataset['ResultMeasure/MeasureUnitCode'] or dataset['DetectionQuantitationLimitMeasure/MeasureUnitCode']  # noqa
         yield {
             '@iot.id': id,
@@ -152,22 +232,29 @@ def yield_datastreams(datasets: dict) -> list:
                 'definition': observed_property_definition,
                 'properties': {
                     'USGSPCode': dataset['USGSPCode'],
-                    'MethodSpeciationName': dataset['MethodSpeciationName'],
+                    'speciation': dataset['MethodSpeciationName'],
                     'iop': dataset['ResultSampleFractionText']
                 }
             },
+            'ObservingProcedure': {
+                '@iot.id': observing_procedure_id,
+                'name': dataset['ResultAnalyticalMethod/MethodName']
+            },
             'Sensor': {
-                'name': dataset['SampleCollectionMethod/MethodName'],
+                '@iot.id': sensor_identifier,
+                'name': sensor_name,
                 'description': sensor_description,
-                'metadata': dataset['ResultAnalyticalMethod/MethodUrl'],
+                'metadata': dataset['ResultAnalyticalMethod/MethodDescriptionText'], # noqa
                 'encodingType': 'text/html',
                 'properties': {
                     'identifier': sensor_identifier,
                     'EquipmentName': dataset['SampleCollectionEquipmentName'],
                     'ResultValueTypeName': dataset['ResultValueTypeName'],
                     'ResultAnalyticalMethod.MethodUrl': dataset['ResultAnalyticalMethod/MethodUrl']  # noqa
-                }
-            }
+                },
+                **sensor_kwargs
+            },
+            **kwargs
         }
 
 
@@ -177,7 +264,7 @@ def load_datastreams(station_id: str):
 
     :returns: `list`, of link relations for all datasets
     """
-    return yield_datastreams(fetch_datastreams(station_id))
+    return yield_datastreams(station_id, fetch_datastreams(station_id))
 
 
 @click.group()

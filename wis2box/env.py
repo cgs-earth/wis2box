@@ -95,6 +95,7 @@ STATIONS = STATION_METADATA / 'wqx_stations.csv'
 THINGS = 'Things'
 
 GEOCONNEX = 'https://geoconnex.us/'
+NLDI_URL = 'https://labs.waterdata.usgs.gov/api/nldi/linked-data/wqp'
 WQP_URL = 'https://www.waterqualitydata.us'
 STATION_URL = url_join(WQP_URL, 'data/Station/search')
 RESULTS_URL = url_join(WQP_URL, 'data/Result/search')

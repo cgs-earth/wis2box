@@ -146,7 +146,7 @@ def cache_stations(ctx, counties, verbosity):
         'countycode': _counties,
         'zip': 'yes',
         'mimeType': 'csv',
-        'startDateLo': '01-01-2020',
+        'startDateLo': '01-01-2023',
         'dataProfile': 'resultPhysChem'
     }
     r = requests.get(RESULTS_URL, params=params)
