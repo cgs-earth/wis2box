@@ -22,13 +22,16 @@
 from base64 import b64encode
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+import hashlib
 import isodate
+import json
 import logging
 import os
 from pathlib import Path
 import re
 from typing import Iterator, Union
 from urllib.parse import urlparse
+from uuid import UUID
 import yaml
 
 LOGGER = logging.getLogger(__name__)
@@ -56,6 +59,25 @@ def get_typed_value(value) -> Union[float, int, str]:
     return value2
 
 
+def to_json(dict_: dict, pretty: bool = False) -> str:
+    """
+    Serialize dict to json
+
+    :param dict_: `dict` of JSON representation
+    :param pretty: `bool` of whether to prettify JSON (default is `False`)
+
+    :returns: JSON string representation
+    """
+
+    if pretty:
+        indent = 4
+    else:
+        indent = None
+
+    return json.dumps(dict_, default=json_serial, indent=indent,
+                      separators=(',', ':'))
+
+
 def json_serial(obj: object) -> Union[bytes, str, float]:
     """
     helper function to convert to JSON non-default
@@ -81,6 +103,9 @@ def json_serial(obj: object) -> Union[bytes, str, float]:
         return float(obj)
     elif isinstance(obj, Path):
         LOGGER.debug('Returning as path string')
+        return str(obj)
+    elif isinstance(obj, UUID):
+        LOGGER.debug('Returning as uuid string')
         return str(obj)
 
     msg = f'{obj} type {type(obj)} not serializable'
@@ -215,3 +240,57 @@ def remove_auth_from_url(url: str) -> str:
     auth = f'{u.username}:{u.password}@'
 
     return url.replace(auth, '')
+
+
+def clean_word(input: str, delim: str = ' ') -> str:
+    """
+    helper function to make clean words
+
+    :param input: string of source
+
+    :returns: str of resulting uuid
+    """
+    return delim.join(re.findall(r'\w+', input))
+
+
+def url_join(*parts: str) -> str:
+    """
+    helper function to join a URL from a number of parts/fragments.
+    Implemented because urllib.parse.urljoin strips subpaths from
+    host urls if they are specified
+
+    Per https://github.com/geopython/pygeoapi/issues/695
+
+    :param parts: list of parts to join
+
+    :returns: str of resulting URL
+    """
+
+    return '/'.join([str(p).strip().strip('/') for p in parts]).rstrip('/')
+
+
+def make_uuid(input: str, raw: bool = False) -> UUID:
+    """
+    helper function to make uuid
+
+    :param input: string of source
+    :param raw: bool of str casting
+
+    :returns: str of resulting uuid
+    """
+    _uuid = UUID(hex=hashlib.md5(input.encode('utf-8')).hexdigest())
+    if raw:
+        return _uuid
+    else:
+        return str(_uuid)
+
+
+def extract_coord(p):
+    """
+    helper function to extract coordinate
+
+    :param input: string of coordinate
+
+    :returns: types coordinate value
+    """
+    return get_typed_value(''.join(re.findall(r'[-\d\.]+', p)))

@@ -19,13 +19,13 @@
 #
 ###############################################################################
 
-import json
 import logging
 
 from requests import Session
 from typing import Tuple
 
 from wis2box.api.backend.base import BaseBackend
+from wis2box.util import url_join, to_json
 
 LOGGER = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ class SensorthingsBackend(BaseBackend):
         super().__init__(defs)
 
         self.type = 'SensorThings'
-        self.url = defs.get('url').rstrip('/')
+        self.url = url_join(defs.get('url'))
         self.http = Session()
 
     def sta_id(self, collection_id: str) -> Tuple[str]:
@@ -54,7 +54,8 @@ class SensorthingsBackend(BaseBackend):
 
         :returns: `str` of STA index
         """
-        return self.url + '/' + collection_id.split('.').pop()
+        entity = collection_id.split('.').pop()
+        return url_join(self.url, entity)
 
     def add_collection(self, collection_id: str) -> dict:
         """
@@ -86,7 +87,8 @@ class SensorthingsBackend(BaseBackend):
         """
         return collection_id != ''
 
-    def upsert_collection_items(self, collection_id: str, items: list) -> str:
+    def upsert_collection_items(self, collection_id: str, items: list,
+                                method: str = 'POST') -> str:
         """
         Add or update collection items
 
@@ -98,7 +100,17 @@ class SensorthingsBackend(BaseBackend):
         sta_index = self.sta_id(collection_id)
 
         for entity in items:
-            self.http.post(sta_index, json.dumps(entity))
+            if method == 'PATCH':
+                item_id = entity['@iot.id']
+                url = f'''{sta_index}('{item_id}')'''
+                r = self.http.patch(url, data=to_json(entity))
+            else:
+                r = self.http.post(sta_index, data=to_json(entity))
+
+            if not r.ok:
+                LOGGER.error(r.content)
+                return False
+        return True
 
     def delete_collection_item(self, collection_id: str, item_id: str) -> str:
         """
@@ -112,6 +124,10 @@ class SensorthingsBackend(BaseBackend):
 
         LOGGER.debug(f'Deleting {item_id} from {collection_id}')
         sta_index = self.sta_id(collection_id)
+        try:
+            item_id = int(item_id)
+        except ValueError:
+            item_id = f"'{item_id}'"
         try:
             self.http.delete(f'{sta_index}({item_id})')
         except Exception as err:

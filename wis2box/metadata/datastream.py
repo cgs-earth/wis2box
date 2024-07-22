@@ -22,6 +22,7 @@
 import click
 import logging
 from requests import Session
+from typing import Iterable
 
 from wis2box import cli_helpers
 from wis2box.api import setup_collection
@@ -65,11 +66,11 @@ def fetch_datastreams(station_id: str):
     return location['data']['relationships']['catalogItems']['data']
 
 
-def yield_datastreams(datasets: dict) -> list:
+def yield_datastreams(datasets: dict) -> Iterable[dict]:
     """
     Yield datasets from USBR RISE API
 
-    :returns: `list`, of link relations for all datasets
+    :returns: `Iterable`, of link relations for all datasets
     """
     http = Session()
     for dataset in datasets:
@@ -89,6 +90,7 @@ def yield_datastreams(datasets: dict) -> list:
                 'definition':  attrs['parameterUnit']
             },
             'ObservedProperty': {
+                '@iot.id': attrs['parameterName'],
                 'name': attrs['parameterName'],
                 'description': attrs['parameterName'],
                 'definition':  attrs['parameterName']

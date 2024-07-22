@@ -112,7 +112,7 @@ def validate_and_load(
         raise ValueError(msg)
 
     if file_type is None:
-        LOGGER.warning('File type missing')
+        LOGGER.info('File type missing')
         file_type = next(iter(plugins))
         LOGGER.debug(f'File type set to first type: {file_type}')
 

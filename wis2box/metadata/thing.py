@@ -22,13 +22,14 @@
 import click
 import csv
 import logging
+from requests import Session
 
 from wis2box import cli_helpers
 from wis2box.api import (setup_collection, upsert_collection_item,
                          delete_collection_item)
 from wis2box.env import DATADIR
-from wis2box.metadata.datastream import load_datastreams
-from wis2box.util import get_typed_value
+from wis2box.metadata.datastream import load_datastreams, gcm
+from wis2box.util import get_typed_value, url_join
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ USBR_URL = 'https://data.usbr.gov'
 RISE_URL = f'{USBR_URL}/rise/api'
 
 
-def gcm() -> dict:
+def gcm_() -> dict:
     """
     Gets collection metadata for API provisioning
 
@@ -72,13 +73,14 @@ def publish_station_collection() -> None:
     :returns: `None`
     """
 
+    setup_collection(meta=gcm_())
     setup_collection(meta=gcm())
 
     with STATIONS.open() as fh:
         reader = csv.DictReader(fh)
 
         for row in reader:
-            station_identifier = row['station_identifier']
+            station_identifier = row.pop('station_identifier')
             try:
                 datastreams = load_datastreams(station_identifier)
             except Exception:
@@ -95,9 +97,9 @@ def publish_station_collection() -> None:
                     'location': {
                         'type': 'Point',
                         'coordinates': [
-                            get_typed_value(row['longitude']),
-                            get_typed_value(row['latitude']),
-                            get_typed_value(row['elevation'])
+                            get_typed_value(row.pop('longitude')),
+                            get_typed_value(row.pop('latitude')),
+                            get_typed_value(row.pop('elevation'))
                         ]}
                 }],
                 'Datastreams': list(datastreams),
@@ -126,6 +128,62 @@ def publish_collection(ctx, verbosity):
 @click.command()
 @click.pass_context
 @cli_helpers.OPTION_VERBOSITY
+def cache_stations(ctx, verbosity):
+    """Caches collection of stations to API config and backend"""
+    http = Session()
+    all_stations = []
+    params = {
+        'hasCatalogItems': 'true',
+        'order[id]': 'asc'
+    }
+    _ = url_join(RISE_URL, 'location')
+    url = http.get(_, params=params).url
+
+    while url:
+        r = http.get(url)
+        response = r.json()
+        
+        # Extract station data
+        for station in response.get('data', []):
+            attributes = station['attributes']
+            if attributes['locationCoordinates']['type'] != 'Point':
+                continue
+
+            coordinates = attributes['locationCoordinates']['coordinates']
+            try:
+                station_data = {
+                    'station_identifier': attributes['_id'],
+                    'station_name': attributes['locationName'],
+                    'description': attributes.get('locationDescription', ''),
+                    'latitude': coordinates[1],
+                    'longitude': coordinates[0],
+                    'elevation': attributes['elevation'],
+                    'create_date': attributes['createDate'],
+                    'update_date': attributes['updateDate'],
+                    'timezone': attributes['timezone'],
+                    'type': attributes['locationTypeName'],
+                    'region': ','.join(attributes.get('locationRegionNames', [])),
+                }
+            except IndexError as err:
+                click.echo(err)
+                click.echo(station)
+                continue
+            all_stations.append(station_data)
+        
+        # Get the next URL from the response
+        links = response.get('links', {})
+        url = url_join(USBR_URL, links.get('next')) if 'next' in links else None
+    
+    # Write station data to CSV
+    fieldnames = ['station_identifier', 'station_name', 'description', 'latitude', 'longitude', 'elevation', 'create_date', 'update_date', 'timezone', 'type', 'region']
+    with open(STATIONS, mode='w', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(all_stations)
+
+@click.command()
+@click.pass_context
+@cli_helpers.OPTION_VERBOSITY
 def delete_collection(ctx, verbosity):
     """Publishes collection of stations to API config and backend"""
 
@@ -139,4 +197,5 @@ def delete_collection(ctx, verbosity):
 
 
 thing.add_command(publish_collection)
+thing.add_command(cache_stations)
 thing.add_command(delete_collection)

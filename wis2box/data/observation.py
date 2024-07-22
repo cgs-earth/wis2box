@@ -27,6 +27,7 @@ import logging
 from pathlib import Path
 from requests import Session, RequestException
 from typing import Union
+from time import sleep
 
 from wis2box import cli_helpers
 from wis2box.api import setup_collection
@@ -140,10 +141,14 @@ class ObservationDataDownload(BaseAbstractData):
         bytes = self.as_bytes(data)
 
         if 'No data' in str(bytes):
-            LOGGER.warning(f'No data for {rmk}')
+            LOGGER.info(f'No data for {rmk}')
         else:
             path = f'{STORAGE_INCOMING}/{self.local_filepath(self.end)}/{rmk}.csv'  # noqa
-            put_data(data, path)
+            try:
+                put_data(data, path)
+            except OSError:
+                sleep(1000)
+                self.transform(input_data=input_data, filename=filename)
             LOGGER.debug('Finished processing subset')
 
     def local_filepath(self, date_):
@@ -166,11 +171,11 @@ def sync_datastreams(station_id, begin, end):
     if end:
         plugin.set_date(end=end)
 
-    params = {'Thing': station_id, 'resulttype': 'hits'}
-    response = plugin._get_response(url=url, params=params)
-    hits = response.get('numberMatched', 10000)
+    # params = {'Thing': station_id, 'resulttype': 'hits'}
+    # response = plugin._get_response(url=url, params=params)
+    # hits = response.get('numberMatched')
 
-    params = {'Thing': station_id, 'limit': hits}
+    params = {'Thing': station_id, 'limit': 10000}
     datastreams = plugin._get_response(url=url, params=params)
 
     for datastream in datastreams['features']:
@@ -211,6 +216,7 @@ def ingest(ctx, station, begin, end, verbosity):
         with STATIONS.open() as fh:
             reader = csv.DictReader(fh)
             for row in reader:
+                sleep(1000)
                 station = row['station_identifier']
                 try:
                     sync_datastreams(station, begin, end)

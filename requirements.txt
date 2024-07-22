@@ -1,7 +1,7 @@
 isodate
 minio
 OWSLib
-paho-mqtt
+paho-mqtt<2
 pygeometa
 PyYAML
 requests

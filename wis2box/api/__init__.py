@@ -93,7 +93,8 @@ def remove_collection(name: str) -> bool:
         return True
 
 
-def upsert_collection_item(collection_id: str, item: dict) -> str:
+def upsert_collection_item(collection_id: str, item: dict,
+                           method: str = 'POST') -> str:
     """
     Add or update a collection item
 
@@ -103,9 +104,8 @@ def upsert_collection_item(collection_id: str, item: dict) -> str:
     :returns: `str` identifier of added item
     """
     backend = load_backend()
-    backend.upsert_collection_items(collection_id, [item])
-
-    return True
+    if backend.upsert_collection_items(collection_id, [item], method):
+        return True
 
 
 def delete_collection_item(collection_id: str, item_id: str) -> str:
