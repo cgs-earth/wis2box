@@ -69,6 +69,10 @@ except TypeError:
 LOGLEVEL = os.environ.get('WIS2BOX_LOGGING_LOGLEVEL', 'ERROR')
 LOGFILE = os.environ.get('WIS2BOX_LOGGING_LOGFILE', 'stdout')
 
+USBR_URL = 'https://data.usbr.gov'
+RISE_URL = f'{USBR_URL}/rise/api'
+RESULT_URL = f'{RISE_URL}/result/download'
+
 missing_environment_variables = []
 
 required_environment_variables = [

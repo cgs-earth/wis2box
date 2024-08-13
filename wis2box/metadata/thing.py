@@ -21,13 +21,15 @@
 
 import click
 import csv
+import multiprocessing as mp
 import logging
 from requests import Session
+from time import sleep
 
 from wis2box import cli_helpers
 from wis2box.api import (setup_collection, upsert_collection_item,
                          delete_collection_item)
-from wis2box.env import DATADIR
+from wis2box.env import DATADIR, RISE_URL, USBR_URL
 from wis2box.metadata.datastream import load_datastreams, gcm
 from wis2box.util import get_typed_value, url_join
 
@@ -36,9 +38,6 @@ LOGGER = logging.getLogger(__name__)
 STATION_METADATA = DATADIR / 'metadata' / 'station'
 STATIONS = STATION_METADATA / 'location_data.csv'
 THINGS = 'Things'
-
-USBR_URL = 'https://data.usbr.gov'
-RISE_URL = f'{USBR_URL}/rise/api'
 
 
 def gcm_() -> dict:
@@ -66,6 +65,43 @@ def thing():
     pass
 
 
+def handle_row(row) -> None:
+    station_identifier = row.pop('station_identifier')
+    try:
+        datastreams = list(load_datastreams(station_identifier))
+        datastreams[0]
+    except Exception as err:
+        LOGGER.error(f'Unable to publish {station_identifier} - {err}')
+        return
+
+    feature = {
+        '@iot.id': station_identifier,
+        'name': row['station_name'],
+        'description': row['station_name'],
+        'Locations': [{
+            '@iot.id': station_identifier,
+            'name': row['station_name'],
+            'description': row['station_name'],
+            'encodingType': 'application/vnd.geo+json',
+            'location': {
+                'type': 'Point',
+                'coordinates': [
+                    get_typed_value(row.pop('longitude')),
+                    get_typed_value(row.pop('latitude')),
+                    get_typed_value(row.pop('elevation'))
+                ]}
+        }],
+        'Datastreams': datastreams,
+        'properties': {
+            'RISE.selfLink': f'{RISE_URL}/location/{station_identifier}', # noqa
+            **row
+        }
+    }
+
+    LOGGER.debug('Publishing to backend')
+    upsert_collection_item(THINGS, feature)
+
+
 def publish_station_collection() -> None:
     """
     Publishes station collection to API config and backend
@@ -80,39 +116,13 @@ def publish_station_collection() -> None:
         reader = csv.DictReader(fh)
 
         for row in reader:
-            station_identifier = row.pop('station_identifier')
-            try:
-                datastreams = load_datastreams(station_identifier)
-            except Exception:
-                LOGGER.error(station_identifier)
-                continue
-            feature = {
-                '@iot.id': station_identifier,
-                'name': row['station_name'],
-                'description': row['station_name'],
-                'Locations': [{
-                    'name': row['station_name'],
-                    'description': row['station_name'],
-                    'encodingType': 'application/vnd.geo+json',
-                    'location': {
-                        'type': 'Point',
-                        'coordinates': [
-                            get_typed_value(row.pop('longitude')),
-                            get_typed_value(row.pop('latitude')),
-                            get_typed_value(row.pop('elevation'))
-                        ]}
-                }],
-                'Datastreams': list(datastreams),
-                'properties': {
-                    'RISE.selfLink': f'{RISE_URL}/location/{station_identifier}', # noqa
-                    **row
-                }
-            }
+            while len(mp.active_children()) == mp.cpu_count():
+                sleep(0.1)
 
-            LOGGER.debug('Publishing to backend')
-            upsert_collection_item(THINGS, feature)
+            p = mp.Process(target=handle_row, args=(row,))
+            p.start()
 
-    return
+    return True
 
 
 @click.command()
@@ -142,7 +152,7 @@ def cache_stations(ctx, verbosity):
     while url:
         r = http.get(url)
         response = r.json()
-        
+
         # Extract station data
         for station in response.get('data', []):
             attributes = station['attributes']
@@ -162,24 +172,29 @@ def cache_stations(ctx, verbosity):
                     'update_date': attributes['updateDate'],
                     'timezone': attributes['timezone'],
                     'type': attributes['locationTypeName'],
-                    'region': ','.join(attributes.get('locationRegionNames', [])),
+                    'region': ','.join(
+                        attributes.get('locationRegionNames', [])),
                 }
             except IndexError as err:
                 click.echo(err)
                 click.echo(station)
                 continue
             all_stations.append(station_data)
-        
+
         # Get the next URL from the response
         links = response.get('links', {})
-        url = url_join(USBR_URL, links.get('next')) if 'next' in links else None
-    
+        url = url_join(USBR_URL, links.get('next')) \
+            if 'next' in links else None
+
     # Write station data to CSV
-    fieldnames = ['station_identifier', 'station_name', 'description', 'latitude', 'longitude', 'elevation', 'create_date', 'update_date', 'timezone', 'type', 'region']
+    fieldnames = ['station_identifier', 'station_name', 'description',
+                  'latitude', 'longitude', 'elevation', 'create_date',
+                  'update_date', 'timezone', 'type', 'region']
     with open(STATIONS, mode='w', newline='') as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(all_stations)
+
 
 @click.command()
 @click.pass_context

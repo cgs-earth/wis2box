@@ -27,18 +27,17 @@ import logging
 from pathlib import Path
 from requests import Session, RequestException
 from typing import Union
-from time import sleep
 
 from wis2box import cli_helpers
 from wis2box.api import setup_collection
 from wis2box.data.base import BaseAbstractData
-from wis2box.env import DATADIR, DOCKER_API_URL, STORAGE_INCOMING
+from wis2box.env import (DATADIR, DOCKER_API_URL, STORAGE_INCOMING,
+                         USBR_URL, RESULT_URL)
 from wis2box.storage import put_data
 from wis2box.topic_hierarchy import validate_and_load
 
 LOGGER = logging.getLogger(__name__)
 
-USBR_URL = 'https://data.usbr.gov/rise/api/result/download'
 
 STATION_METADATA = DATADIR / 'metadata' / 'station'
 STATIONS = STATION_METADATA / 'location_data.csv'
@@ -56,7 +55,7 @@ def gcm() -> dict:
         'title': 'Observations',
         'description': 'SensorThings API Observations',
         'keywords': ['observation', 'dam'],
-        'links': ['https://data.usbr.gov/rise-api'],
+        'links': [f'{USBR_URL}/rise-api'],
         'bbox': [-180, -90, 180, 90],
         'time_field': 'resultTime',
         'id_field': '@iot.id'
@@ -137,18 +136,16 @@ class ObservationDataDownload(BaseAbstractData):
             'itemId': input_data,
             'filename': f'{rmk}.csv'
         }
-        data = self._get_response(USBR_URL, params)
+        data = self._get_response(RESULT_URL, params)
         bytes = self.as_bytes(data)
 
         if 'No data' in str(bytes):
             LOGGER.info(f'No data for {rmk}')
         else:
             path = f'{STORAGE_INCOMING}/{self.local_filepath(self.end)}/{rmk}.csv'  # noqa
-            try:
-                put_data(data, path)
-            except OSError:
-                sleep(1000)
-                self.transform(input_data=input_data, filename=filename)
+
+            put_data(data, path)
+
             LOGGER.debug('Finished processing subset')
 
     def local_filepath(self, date_):
@@ -216,7 +213,6 @@ def ingest(ctx, station, begin, end, verbosity):
         with STATIONS.open() as fh:
             reader = csv.DictReader(fh)
             for row in reader:
-                sleep(1000)
                 station = row['station_identifier']
                 try:
                     sync_datastreams(station, begin, end)

@@ -19,18 +19,18 @@
 #
 ###############################################################################
 
+import asyncio
 import click
 import logging
+import httpx
 from requests import Session
-from typing import Iterable
+from typing import AsyncGenerator, Dict, Any
 
 from wis2box import cli_helpers
 from wis2box.api import setup_collection
+from wis2box.env import RISE_URL, USBR_URL
 
 LOGGER = logging.getLogger(__name__)
-
-USBR_URL = 'https://data.usbr.gov'
-RISE_URL = f'{USBR_URL}/rise/api'
 
 
 def gcm() -> dict:
@@ -66,42 +66,66 @@ def fetch_datastreams(station_id: str):
     return location['data']['relationships']['catalogItems']['data']
 
 
-def yield_datastreams(datasets: dict) -> Iterable[dict]:
+async def fetch_catalog_item(client: httpx.AsyncClient,
+                             dataset_id: str) -> dict:
     """
-    Yield datasets from USBR RISE API
+    Fetch a catalog item from the USBR RISE API asynchronously.
 
-    :returns: `Iterable`, of link relations for all datasets
+    :param client: An instance of httpx.AsyncClient.
+    :param dataset_id: The ID of the dataset.
+    :return: The JSON response as a dictionary.
     """
-    http = Session()
-    for dataset in datasets:
-        catalog_item = http.get(USBR_URL + dataset['id']).json()
-        attrs = catalog_item['data']['attributes']
-        yield {
-            '@iot.id': attrs['_id'],
-            'name': attrs['itemTitle'],
-            'description': attrs['itemDescription'],
-            'observationType': 'http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement',  # noqa
-            'properties': {
-                'RISE.selfLink': USBR_URL + dataset['id']
-            },
-            'unitOfMeasurement': {
-                'name': attrs['parameterUnit'],
-                'symbol': attrs['parameterUnit'],
-                'definition':  attrs['parameterUnit']
-            },
-            'ObservedProperty': {
-                '@iot.id': attrs['parameterName'],
-                'name': attrs['parameterName'],
-                'description': attrs['parameterName'],
-                'definition':  attrs['parameterName']
-            },
-            'Sensor': {
-                'name': 'Unknown',
-                'description': 'Unknown',
-                'encodingType':  'Unknown',
-                'metadata': 'Unknown'
+    response = await client.get(f'{USBR_URL}{dataset_id}')
+    return response.json()
+
+
+async def yield_datastreams(
+        datasets: dict) -> AsyncGenerator[Dict[str, Any], None]:
+    """
+    Yield datasets from USBR RISE API asynchronously.
+
+    :returns: An iterable of link relations for all datasets.
+    """
+    async with httpx.AsyncClient() as client:
+        tasks = [
+            fetch_catalog_item(client, dataset['id'])
+            for dataset in datasets
+        ]
+        catalog_items = await asyncio.gather(*tasks)
+
+        for catalog_item in catalog_items:
+            attrs = catalog_item['data']['attributes']
+            if not attrs.get('parameterUnit'):
+                continue
+
+            parameter_id = attrs['parameterId']
+            yield {
+                '@iot.id': attrs['_id'],
+                'name': attrs['itemTitle'],
+                'description': attrs['itemDescription'],
+                'observationType': 'http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement',  # noqa
+                'properties': {
+                    'RISE.selfLink': f"{USBR_URL}{catalog_item['data']['id']}"
+                },
+                'unitOfMeasurement': {
+                    'name': attrs['parameterUnit'],
+                    'symbol': attrs['parameterUnit'],
+                    'definition': attrs['parameterUnit']
+                },
+                'ObservedProperty': {
+                    '@iot.id': parameter_id,
+                    'name': attrs['parameterName'],
+                    'description': attrs['parameterName'],
+                    'definition': f'{RISE_URL}/parameter/{parameter_id}'
+                },
+                'Sensor': {
+                    '@iot.id': 0,
+                    'name': 'Unknown',
+                    'description': 'Unknown',
+                    'encodingType': 'Unknown',
+                    'metadata': 'Unknown'
+                }
             }
-        }
 
 
 def load_datastreams(station_id: str):
@@ -111,7 +135,11 @@ def load_datastreams(station_id: str):
     :returns: `list`, of link relations for all datasets
     """
 
-    return yield_datastreams(fetch_datastreams(station_id))
+    async def get_datastreams():
+        return [datastream async for datastream in
+                yield_datastreams(fetch_datastreams(station_id))]
+
+    return asyncio.run(get_datastreams())
 
 
 @click.group()

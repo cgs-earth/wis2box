@@ -25,9 +25,12 @@ from io import StringIO
 import json
 import logging
 from pathlib import Path
+import requests
 from typing import Union
 
 from wis2box.data.geojson import ObservationDataGeoJSON
+from wis2box.util import to_json
+from wis2box.env import API_BACKEND_URL
 
 LOGGER = logging.getLogger(__name__)
 
@@ -105,6 +108,52 @@ class ObservationDataCSV(ObservationDataGeoJSON):
                     },
                 }
             }
+
+    def publish(self) -> bool:
+        LOGGER.info('Publishing output data')
+
+        batch_request = {'requests': []}
+        request_id = 0
+        for identifier, item in self.output_data.items():
+            for format_, the_data in item.items():
+                if format_ == '_meta':
+                    continue
+
+                LOGGER.debug(f'Processing format: {format_}')
+
+                if the_data is None:
+                    msg = f'Empty data for {identifier}-{format_}; not publishing' # noqa
+                    LOGGER.warning(msg)
+                    continue
+
+                LOGGER.debug('Preparing data for batch request')
+
+                batch_request['requests'].append({
+                    'id': str(request_id),
+                    'method': 'post',
+                    'url': 'Observations',
+                    'body': the_data
+                })
+                request_id += 1
+
+        try:
+            r = requests.post(
+                f'{API_BACKEND_URL}/$batch',
+                data=to_json(batch_request),
+                headers={'Content-Type': 'application/json'}
+            )
+
+            # Check the response status
+            if r.status_code == 200:
+                LOGGER.info('Successfully published all data in batch.')
+                return True
+            else:
+                msg = f'Failed to publish data: {r.status_code}, {r.text}'
+                LOGGER.error(msg)
+                return False
+        except Exception as e:
+            LOGGER.error(f'Exception occurred: {e}')
+            return False
 
     def __repr__(self):
         return '<ObservationDataCSV>'
