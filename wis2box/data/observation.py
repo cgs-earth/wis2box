@@ -19,6 +19,7 @@
 #
 ###############################################################################
 
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import click
 import csv
 from datetime import datetime, timedelta
@@ -89,7 +90,7 @@ class ObservationDataDownload(BaseAbstractData):
 
     def set_date(self, begin: str = '', end: str = '') -> None:
         """
-        Set date parametetrs
+        Set date parameters
 
         :param begin: `str` data search date begin
         :param end: `str` data search date end
@@ -168,10 +169,6 @@ def sync_datastreams(station_id, begin, end):
     if end:
         plugin.set_date(end=end)
 
-    # params = {'Thing': station_id, 'resulttype': 'hits'}
-    # response = plugin._get_response(url=url, params=params)
-    # hits = response.get('numberMatched')
-
     params = {'Thing': station_id, 'limit': 10000}
     datastreams = plugin._get_response(url=url, params=params)
 
@@ -181,6 +178,15 @@ def sync_datastreams(station_id, begin, end):
         except Exception as err:
             LOGGER.error(datastream['id'])
             LOGGER.error(err)
+
+
+def process(row, begin, end):
+    station = row['station_identifier']
+    try:
+        sync_datastreams(station, begin, end)
+    except Exception as err:
+        return f'{err} with {station}'
+    return None
 
 
 @click.group()
@@ -212,12 +218,15 @@ def ingest(ctx, station, begin, end, verbosity):
     if station == '*':
         with STATIONS.open() as fh:
             reader = csv.DictReader(fh)
-            for row in reader:
-                station = row['station_identifier']
-                try:
-                    sync_datastreams(station, begin, end)
-                except Exception as err:
-                    click.echo(f'{err} with {station}')
+            rows = list(reader)
+
+        with ProcessPoolExecutor() as e:
+            futures = {e.submit(process, row, begin, end): row 
+                       for row in rows}
+            for future in as_completed(futures):
+                error = future.result()
+                if error:
+                    click.echo(error)
     else:
         sync_datastreams(station, begin, end)
 
