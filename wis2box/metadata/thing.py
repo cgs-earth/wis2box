@@ -98,7 +98,12 @@ class OregonClient():
         self.params[param] = value
 
     def fetch(self):
-        response = self.session.get(self.BASE_URL, params=self.params).json()
+        url = self.BASE_URL
+        for key, value in self.params.items():
+            url += f"{key}={value}&"
+        url = url.removesuffix('&')
+        print(url)
+        response = self.session.get(url).json()
         return response
 
 METADATA = {
