@@ -28,7 +28,6 @@ from typing import AsyncGenerator, Dict, Any
 
 from wis2box import cli_helpers
 from wis2box.api import setup_collection
-from wis2box.env import RISE_URL, USBR_URL
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,7 +44,7 @@ def gcm() -> dict:
         'title': 'Datastreams',
         'description': 'SensorThings API Datastreams',
         'keywords': ['datastream', 'dam'],
-        'links': ['https://data.usbr.gov/rise-api'],
+        'links': ['https://gis.wrd.state.or.us/server/rest/services', "https://gis.wrd.state.or.us/server/sdk/rest/index.html#/02ss00000029000000"],
         'bbox': [-180, -90, 180, 90],
         'id_field': '@iot.id',
         'title_field': 'name'
