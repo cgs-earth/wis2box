@@ -19,15 +19,24 @@
 #
 ###############################################################################
 
-from typing import TypedDict, Optional, List
+import csv
+import requests
+import io
+from typing import Tuple, TypedDict, Optional, List
 import click
 import logging
 from requests import Session
 import datetime
-from wis2box import cli_helpers
+from wis2box import cli_helpers, data
 from wis2box.api import remove_collection, setup_collection, upsert_collection_item
 from urllib.parse import parse_qs, urlencode, urlparse
 from requests import Session
+
+from wis2box.api.backend import load_backend
+from wis2box.api.backend.sensorthings import SensorthingsBackend
+from wis2box.env import API_BACKEND_URL, STORAGE_INCOMING
+from wis2box.storage import put_data
+from wis2box.util import to_json
 
 LOGGER = logging.getLogger(__name__)
 
@@ -304,7 +313,7 @@ class OregonClient:
     def format_where_param(self, station_numbers: List[int]) -> str:
         wrapped_with_quotes = [f"'{station}'" for station in station_numbers]
         formatted_stations = " , ".join(wrapped_with_quotes)
-        query =  f"station_nbr IN ({formatted_stations})"
+        query = f"station_nbr IN ({formatted_stations})"
         return query
 
 
@@ -402,13 +411,50 @@ def generate_phenomenon_time(attributes: Attributes) -> Optional[str]:
     return phenomenonTime
 
 
+def get_data_associated_with_station(
+    station_nbr, start_date, end_date, dataset
+) -> Tuple[list[float], list[str]]:
+    """Ingest all data from a station and return the third column."""
+    backend: SensorthingsBackend = load_backend()
+    start_date = "9/24/2024 12:00:00"
+    end_date = "9/30/2024 12:00:00"
+    dataset = "MDF"
+    base_url = (
+        "https://apps.wrd.state.or.us/apps/sw/hydro_near_real_time/hydro_download.aspx"
+    )
+    # TODO change MDF to the dataset name; these don't exactly match up however
+    tsv_url = f"{base_url}?{urlencode({'station_nbr': station_nbr, 'start_date': start_date, 'end_date': end_date, 'dataset': dataset, 'format': 'tsv'})}"
+
+    # Fetch the URL and download the data
+    response = backend.http.get(tsv_url).content
+    put_data(response, f"{STORAGE_INCOMING}/oregon/{station_nbr}_{dataset}.tsv")
+
+    # we just use the third column since the name of the dataset in the
+    # url does not match the name in the result column. However,
+    # it consistently is returned in the third column
+    third_column_data = []
+    date_data: list[str] = []
+    tsv_data = io.StringIO(response.decode("utf-8"))
+    reader = csv.reader(tsv_data, delimiter="\t")
+
+    # Skip the header row if it exists
+    header = next(reader, None)
+    if header is not None:
+        for row in reader:
+            if len(row) >= 3:
+                if row[2] == "":
+                    third_column_data.append(None)
+                else:
+                    third_column_data.append(float(row[2]))
+            date_data.append(row[1])
+
+    return (third_column_data, date_data)
+
+
 def generate_datastreams(attr: Attributes) -> list[Datastream]:
     datastreams = []
     for stream in POTENTIAL_DATASTREAMS:
-        if stream not in attr:
-            continue
-
-        if str(attr[stream]) != "1":
+        if stream not in attr or str(attr[stream]) != "1":
             continue
 
         time = generate_phenomenon_time(attr)
@@ -432,7 +478,7 @@ def generate_datastreams(attr: Attributes) -> list[Datastream]:
                 "description": "Unknown",
                 "encodingType": "Unknown",
                 "metadata": "Unknown",
-            }
+            },
         }
         if time:
             datastream["phenomenonTime"] = time
@@ -440,8 +486,65 @@ def generate_datastreams(attr: Attributes) -> list[Datastream]:
         datastreams.append(datastream)
     return datastreams
 
+
+def publish_datasets_for_station(station: StationData):
+    data_for_batch_request = []
+    for stream in POTENTIAL_DATASTREAMS:
+        attr = station["attributes"]
+        if stream not in attr or str(attr[stream]) != "1":
+            continue
+
+        datapoints, time_for_datapoints = get_data_associated_with_station(
+            station_nbr=station["attributes"]["station_name"],
+            start_date=attr["period_of_record_start_date"],
+            end_date=attr["period_of_record_end_date"],
+            dataset=stream,
+        )
+
+        sta_formatted_data = {
+            "_meta": {
+                "identifier": attr["station_nbr"],
+                "data_date": generate_phenomenon_time(attr),
+                "relative_filepath": "N/A",
+            },
+            "geojson": {
+                "phenomenonTime": generate_phenomenon_time(attr),
+                "resultTime": time_for_datapoints,
+                "result": datapoints,
+                "Datastream": {"@iot.id": stream},
+                "FeatureOfInterest": {
+                    "@iot.id": stream,
+                    "name": attr["station_name"],
+                    "description": attr["station_name"],
+                    "encodingType": "application/vnd.geo+json",
+                    "feature": {
+                        "type": "Point",
+                        "coordinates": [
+                            attr["longitude_dec"],
+                            attr["latitude_dec"],
+                            attr["elevation"],
+                        ],
+                    },
+                },
+            },
+        }
+
+        data_for_batch_request.append(sta_formatted_data)
+        break
+
+    batch_request_body = {"requests": data_for_batch_request}
+    r = requests.post(
+        f"{API_BACKEND_URL}/$batch",
+        data=to_json(batch_request_body),
+        headers={"Content-Type": "application/json"},
+    )
+    if r.status_code != 200:
+        raise Exception(r.text)
+
+
 def process_stations(result: dict):
     features: list[StationData] = result.get("features", [])
+
     for station in features:
         attr = station["attributes"]
         station_data = {
@@ -466,16 +569,21 @@ def process_stations(result: dict):
             "Datastreams": generate_datastreams(attr),
             "properties": {
                 **attr,
-            }
+            },
         }
         upsert_collection_item(THINGS_COLLECTION, station_data)
+
+        publish_datasets_for_station(station)
 
 
 # In the load_stations function
 @click.command()
 @click.pass_context
+@click.option("--station", "-s", default="*", help="station identifier")
+@click.option("--begin", "-b", help="data start date")
+@click.option("--end", "-e", help="data end date")
 @cli_helpers.OPTION_VERBOSITY
-def load_stations(ctx, verbosity):
+def load(ctx, verbosity, station, begin, end):
     """Loads stations into sensorthings backend"""
     remove_collection(THINGS_COLLECTION)
 
@@ -499,17 +607,17 @@ def load_stations(ctx, verbosity):
 @click.command()
 @click.pass_context
 @cli_helpers.OPTION_VERBOSITY
-def delete_collection(ctx, verbosity):
+def delete(ctx, verbosity):
     """Publishes collection of stations to API config and backend"""
     remove_collection(THINGS_COLLECTION)
 
 
 @click.group()
-def thing():
+def oregon():
     """Station metadata management"""
     pass
 
 
-thing.add_command(publish_collection)
-thing.add_command(load_stations)
-thing.add_command(delete_collection)
+oregon.add_command(publish_collection)
+oregon.add_command(load)
+oregon.add_command(delete)

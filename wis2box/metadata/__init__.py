@@ -25,7 +25,7 @@ import logging
 from wis2box.metadata.datastream import datastream
 from wis2box.metadata.discovery import discovery_metadata
 from wis2box.metadata.station import station
-from wis2box.metadata.thing import thing
+from wis2box.metadata.oregon_thing import oregon
 
 LOGGER = logging.getLogger(__name__)
 
@@ -39,4 +39,4 @@ def metadata():
 metadata.add_command(datastream)
 metadata.add_command(discovery_metadata)
 metadata.add_command(station)
-metadata.add_command(thing)
+metadata.add_command(oregon)
