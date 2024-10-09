@@ -20,6 +20,8 @@
 ###############################################################################
 
 import csv
+import json
+import sys
 import requests
 import io
 from typing import Tuple, TypedDict, Optional, List
@@ -443,11 +445,13 @@ def get_data_associated_with_station(
         for row in reader:
             if len(row) >= 3:
                 if row[2] == "":
-                    third_column_data.append(None)
+                    third_column_data.append(1.90)
                 else:
                     third_column_data.append(float(row[2]))
             date_data.append(row[1])
 
+    assert any(third_column_data)
+    assert any(date_data)
     return (third_column_data, date_data)
 
 
@@ -488,7 +492,6 @@ def generate_datastreams(attr: Attributes) -> list[Datastream]:
 
 
 def publish_datasets_for_station(station: StationData):
-    data_for_batch_request = []
     for stream in POTENTIAL_DATASTREAMS:
         attr = station["attributes"]
         if stream not in attr or str(attr[stream]) != "1":
@@ -502,44 +505,35 @@ def publish_datasets_for_station(station: StationData):
         )
 
         sta_formatted_data = {
-            "_meta": {
-                "identifier": attr["station_nbr"],
-                "data_date": generate_phenomenon_time(attr),
-                "relative_filepath": "N/A",
-            },
-            "geojson": {
-                "phenomenonTime": generate_phenomenon_time(attr),
-                "resultTime": time_for_datapoints,
-                "result": datapoints,
-                "Datastream": {"@iot.id": stream},
-                "FeatureOfInterest": {
-                    "@iot.id": stream,
-                    "name": attr["station_name"],
-                    "description": attr["station_name"],
-                    "encodingType": "application/vnd.geo+json",
-                    "feature": {
-                        "type": "Point",
-                        "coordinates": [
-                            attr["longitude_dec"],
-                            attr["latitude_dec"],
-                            attr["elevation"],
-                        ],
-                    },
+            "phenomenonTime": generate_phenomenon_time(attr),
+            "resultTime": time_for_datapoints,
+            "Datastream": {"@iot.id": stream},
+            "result": 1.0,
+
+            "FeatureOfInterest": {
+                "@iot.id": stream,
+                "name": attr["station_name"],
+                "description": attr["station_name"],
+                "encodingType": "application/vnd.geo+json",
+                "feature": {
+                    "type": "Point",
+                    "coordinates": [
+                        attr["longitude_dec"],
+                        attr["latitude_dec"],
+                        attr["elevation"],
+                    ],
                 },
             },
         }
+        LOGGER.error(f"added data for {attr['station_name']}")
+        r = requests.post(
+            f"{API_BACKEND_URL}/Observations",
+            data=json.dumps(sta_formatted_data),
+            headers={"Content-Type": "application/json"},
+        )
 
-        data_for_batch_request.append(sta_formatted_data)
-        break
-
-    batch_request_body = {"requests": data_for_batch_request}
-    r = requests.post(
-        f"{API_BACKEND_URL}/$batch",
-        data=to_json(batch_request_body),
-        headers={"Content-Type": "application/json"},
-    )
-    if r.status_code != 200:
-        raise Exception(r.text)
+        if r.status_code != 200:
+            raise Exception(r.text)
 
 
 def process_stations(result: dict):
