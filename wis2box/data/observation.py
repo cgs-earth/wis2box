@@ -55,7 +55,7 @@ def gcm() -> dict:
         'title': 'Observations',
         'description': 'SensorThings API Observations',
         'keywords': ['observation', 'dam'],
-        'links': ["google.com"],
+        'links': ["https://gis.wrd.state.or.us/server/rest/services/dynamic/Gaging_Stations_WGS84/FeatureServer/2/"],
         'bbox': [-180, -90, 180, 90],
         'time_field': 'resultTime',
         'id_field': '@iot.id'
@@ -156,42 +156,9 @@ class ObservationDataDownload(BaseAbstractData):
         return '<ObservationDataDownload>'
 
 
-def sync_datastreams(station_id, begin, end):
-    url = DOCKER_API_URL + '/collections/datastreams/items'
-
-    _, plugins = validate_and_load('iow.demo.Observations')
-    [plugin] = [p for p in plugins
-                if isinstance(p, ObservationDataDownload)]
-
-    if begin:
-        plugin.set_date(begin=begin)
-    if end:
-        plugin.set_date(end=end)
-
-    params = {'Thing': station_id, 'limit': 10000}
-    datastreams = plugin._get_response(url=url, params=params)
-
-    for datastream in datastreams['features']:
-        try:
-            plugin.transform(datastream['id'], datastream['id'])
-        except Exception as err:
-            LOGGER.error(datastream['id'])
-            LOGGER.error(err)
 
 
-def process(row, begin, end):
-    station = row['station_identifier']
-    try:
-        sync_datastreams(station, begin, end)
-    except Exception as err:
-        return f'{err} with {station}'
-    return None
 
-
-@click.group()
-def observation():
-    """Observation metadata management"""
-    pass
 
 
 @click.command()
@@ -214,22 +181,12 @@ def ingest(ctx, station, begin, end, verbosity):
     """Ingest all data from a station"""
     click.echo('Ingesting observations')
 
-    if station == '*':
-        with STATIONS.open() as fh:
-            reader = csv.DictReader(fh)
-            rows = list(reader)
-
-        with ProcessPoolExecutor() as e:
-            futures = {e.submit(process, row, begin, end): row 
-                       for row in rows}
-            for future in as_completed(futures):
-                error = future.result()
-                if error:
-                    click.echo(error)
-    else:
-        sync_datastreams(station, begin, end)
 
     click.echo('Done')
+@click.group()
+def observation():
+    """Observation metadata management"""
+    pass
 
 
 observation.add_command(publish_collection)

@@ -19,8 +19,6 @@
 #
 ###############################################################################
 
-import json
-import os
 from typing import TypedDict, Optional, List
 import click
 import logging
@@ -31,60 +29,138 @@ from wis2box.api import remove_collection, setup_collection, upsert_collection_i
 from urllib.parse import parse_qs, urlencode, urlparse
 from requests import Session
 
-from wis2box.auth import delete_token
-
 LOGGER = logging.getLogger(__name__)
 
 THINGS_COLLECTION = "Things"
 
 ALL_RELEVANT_STATIONS = [
-    "10378500",
-    "10392400",
-    "11491400",
-    "11494000",
-    "11494510",
-    "11495900",
-    "11497500",
-    "11497550",
-    "11500400",
-    "11500500",
-    "11502550",
-    "11503500",
-    "11504103",
-    "11504109",
-    "11504120",
-    "11510000",
-    "13214000",
-    "13215000",
-    "13216500",
-    "13217500",
-    "13269450",
-    "13273000",
-    "13275105",
-    "13275300",
-    "13281200",
-    "13282550",
-    "13317850",
-    "13318060",
-    "13318210",
-    "13318920",
-    "13325500",
-    "13329100",
-    "13329765",
-    "13330000",
-    "13330300",
-    "13330500",
-    "13331450",
-    "14010000",
-    "14010800",
-    "14021000",
-    "14022500",
-    "14023500",
-    "14024300",
-    "14025000",
-    "14026000",
-    "14029900",
-    "14031050",
+    10378500,
+    10392400,
+    11491400,
+    11494000,
+    11494510,
+    11495900,
+    11497500,
+    11497550,
+    11500400,
+    11500500,
+    11502550,
+    11503500,
+    11504103,
+    11504109,
+    11504120,
+    11510000,
+    13214000,
+    13215000,
+    13216500,
+    13217500,
+    13269450,
+    13273000,
+    13275105,
+    13275300,
+    13281200,
+    13282550,
+    13317850,
+    13318060,
+    13318210,
+    13318920,
+    13325500,
+    13329100,
+    13329765,
+    13330000,
+    13330300,
+    13330500,
+    13331450,
+    14010000,
+    14010800,
+    14021000,
+    14022500,
+    14023500,
+    14024300,
+    14025000,
+    14026000,
+    14029900,
+    14031050,
+    14031600,
+    14032000,
+    14032400,
+    14039500,
+    14054000,
+    14056500,
+    14060000,
+    14063000,
+    14064500,
+    14070920,
+    14070980,
+    14073520,
+    14074900,
+    14075000,
+    14076020,
+    14076100,
+    14079800,
+    14080500,
+    14081500,
+    14082550,
+    14083400,
+    14085700,
+    14087300,
+    14088500,
+    14095250,
+    14095255,
+    14104125,
+    14104190,
+    14104700,
+    14104800,
+    14105545,
+    14105550,
+    14192500,
+    14193000,
+    14202510,
+    14202850,
+    14306820,
+    14306900,
+    14320700,
+    14327120,
+    14327122,
+    14327137,
+    14327300,
+    14335200,
+    14335230,
+    14335235,
+    14335250,
+    14335300,
+    14335500,
+    14336700,
+    14337000,
+    14340800,
+    14341610,
+    14342500,
+    14343000,
+    14346700,
+    14346900,
+    14347800,
+    14348080,
+    14348150,
+    14348400,
+    14350900,
+    14352000,
+    14352001,
+    14354100,
+    14354950,
+    14355875,
+    14357000,
+    14357503,
+    14358610,
+    14358680,
+    14358725,
+    14358750,
+    14358800,
+    14360500,
+    14363450,
+    14365500,
+    14368300,
+    14375200,
+    14400200,
 ]
 
 
@@ -209,33 +285,34 @@ class OregonClient:
     BASE_URL: str = "https://gis.wrd.state.or.us/server/rest/services/dynamic/Gaging_Stations_WGS84/FeatureServer/2/query?"
 
     def __init__(self):
-        self.params = {
-            "where": self.format_where_param(),
+        self.session = Session()
+
+    def fetch_stations(self, station_numbers: List[int]) -> dict:
+        """Fetches stations given a list of station numbers."""
+        params = {
+            "where": self.format_where_param(station_numbers),
             "outFields": "*",
             "f": "json",
         }
-        self.session = Session()
+        url = self.BASE_URL + urlencode(params)
+        response = self.session.get(url)
+        if response.ok:
+            return response.json()
+        else:
+            raise RuntimeError(response.url)
 
-    def format_where_param(self) -> str:
-        wrapped_with_quotes = [f"'{station}'" for station in ALL_RELEVANT_STATIONS]
-        formatted_stations = ",".join(wrapped_with_quotes)
-        return f"station_nbr IN ({formatted_stations})"
-
-    def change_param(self, param: str, value: str):
-        self.params[param] = value
-
-    def fetch(self) -> dict:
-        url = self.BASE_URL + urlencode(self.params)
-        print(url)
-        response = self.session.get(url).json()
-        return response
+    def format_where_param(self, station_numbers: List[int]) -> str:
+        wrapped_with_quotes = [f"'{station}'" for station in station_numbers]
+        formatted_stations = " , ".join(wrapped_with_quotes)
+        query =  f"station_nbr IN ({formatted_stations})"
+        return query
 
 
 METADATA = {
     "id": THINGS_COLLECTION,
     "title": THINGS_COLLECTION,
-    "description": "SensorThings API Things",
-    "keywords": ["thing", "dam"],
+    "description": "Oregon Water Resource SensorThings",
+    "keywords": ["thing", "oregons"],
     "links": [
         "https://gis.wrd.state.or.us/server/rest/services",
         "https://gis.wrd.state.or.us/server/sdk/rest/index.html#/02ss00000029000000",
@@ -292,25 +369,20 @@ POTENTIAL_DATASTREAMS = [
     "mean_daily_volume_available",
     "mean_daily_stage_available",
     "rating_curve_available",
-    "water_temp_instantaneous_available",
-    "water_temp_measurement_available",
+    "water_temp_instantaneous_avail",
+    "water_temp_measurement_avail",
     "water_temp_mean_available",
     "water_temp_max_available",
     "water_temp_min_available",
-    "air_temp_instantaneous_available",
+    "air_temp_instantaneous_avail",
     "air_temp_mean_available",
     "air_temp_max_available",
     "air_temp_min_available",
     "precipitation_available",
 ]
 
-# geometry = station["geometry"]
-# points = [float(value) for value in geometry.values()]
-ESRI_TO_GEOJSON_SPECIFIER = {
-    "esriGeometryPoint": "Point",
-}
 
-def generate_phenomenon_time(attributes: Attributes) -> str:
+def generate_phenomenon_time(attributes: Attributes) -> Optional[str]:
     if attributes["period_of_record_start_date"] is not None:
         start = datetime.datetime.fromtimestamp(
             attributes["period_of_record_start_date"] / 1000
@@ -325,93 +397,53 @@ def generate_phenomenon_time(attributes: Attributes) -> str:
     else:
         end = ".."  # Default value if end date is None
 
-    phenomenonTime = (
-        start + "/" + end if start != ".." and end == ".." else ""
-    )
+    phenomenonTime = start + "/" + end if start != ".." and end == ".." else None
+    assert phenomenonTime != ""
     return phenomenonTime
 
 
-@click.command()
-@click.pass_context
-@cli_helpers.OPTION_VERBOSITY
-def load_stations(ctx, verbosity):
-    """Caches collection of stations to API config and backend"""
-    remove_collection(THINGS_COLLECTION)
+def generate_datastreams(attr: Attributes) -> list[Datastream]:
+    datastreams = []
+    for stream in POTENTIAL_DATASTREAMS:
+        if stream not in attr:
+            continue
 
-    if os.path.exists("stations.json"):
-        print("Using cached stations")
-        with open("stations.json", "r") as fh:
-            result = json.load(fh)
-    else: 
-        client = OregonClient()
-        result = client.fetch()
+        if str(attr[stream]) != "1":
+            continue
 
-        with open("stations.json", "w") as fh:
-            json.dump(result, fh)
+        time = generate_phenomenon_time(attr)
+        property = stream.removesuffix("_available").removesuffix("_avail")
+        datastream = {
+            "name": property,
+            "description": property,
+            "observationType": "http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement",
+            "unitOfMeasurement": {
+                "name": "Unknown",
+                "symbol": "Unknown",
+                "definition": "Unknown",
+            },
+            "ObservedProperty": {
+                "name": property,
+                "description": property,
+                "definition": "Unknown",
+            },
+            "Sensor": {
+                "name": "Unkown",
+                "description": "Unknown",
+                "encodingType": "Unknown",
+                "metadata": "Unknown",
+            }
+        }
+        if time:
+            datastream["phenomenonTime"] = time
 
+        datastreams.append(datastream)
+    return datastreams
+
+def process_stations(result: dict):
     features: list[StationData] = result.get("features", [])
-    setup_collection(meta=METADATA)
-
     for station in features:
         attr = station["attributes"]
-
-        # example datastream located at
-        # https://gis.wrd.state.or.us/server/rest/services/dynamic/Gaging_Stations_WGS84/FeatureServer/2/query?where=station_nbr+IN+%28%2714211814%27%2C+%2713331450%27%29&outFields=*&f=json
-
-        datastreams = []
-        for stream in POTENTIAL_DATASTREAMS:
-            if stream not in attr:
-                continue
-            
-            if not str(attr[stream]) == "1":
-                continue 
-
-            # datastream: Datastream = {
-            #     "description": stream,
-            #     "name": stream,
-            #     "observationType": "http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement",
-            #     "unitOfMeasurement": {
-            #         "name": "Degree Celsius",
-            #         "symbol": "degC",
-            #         "definition": "http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Observation",
-            #     },
-            #     "ObservedProperty": {
-            #         "name": "Area Temperature",
-            #         "description": "The degree or intensity of heat present in the area",
-            #         "definition": "http://www.qudt.org/qudt/owl/1.0.0/quantity/Instances.html#AreaTemperature"
-            #     },
-            #     "phenomenonTime": generate_phenomenon_time(attr),
-            #     "Sensor": {
-            #         "name": "Unknown",
-            #         "description": "Unknown",
-            #         "encodingType": "application/vnd.geo+json",
-            #         "metadata": "Unknown",
-            #     },
-            # }
-            datastream =  {
-                    "name": stream.removesuffix("_available").removesuffix("_avail"),
-                    "description": stream.removesuffix("_available").removesuffix("_avail"),
-                    "observationType": "http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement",
-                    "unitOfMeasurement": {
-                    "name": "Degree Celsius",
-                    "symbol": "degC",
-                    "definition": "http://www.qudt.org/qudt/owl/1.0.0/unit/Instances.html#DegreeCelsius"
-                    },
-                    "ObservedProperty": {
-                    "name": "Area Temperature",
-                    "description": "The degree or intensity of heat present in the area",
-                    "definition": "http://www.qudt.org/qudt/owl/1.0.0/quantity/Instances.html#AreaTemperature"
-                    },
-                    "Sensor": {
-                    "name": "DHT22",
-                    "description": "DHT22 temperature sensor",
-                    "encodingType": "application/pdf",
-                    "metadata": "https://cdn-shop.adafruit.com/datasheets/DHT22.pdf"
-                    }
-                }
-
-            datastreams.append(datastream)
-
         station_data = {
             "name": attr["station_name"],
             "@iot.id": f"{attr['station_nbr']}",
@@ -431,16 +463,37 @@ def load_stations(ctx, verbosity):
                     },
                 }
             ],
-            "Datastreams": datastreams,
+            "Datastreams": generate_datastreams(attr),
             "properties": {
-                "Deployment Condition": "test",
-                "Deployment Method": "test",
-            },
+                **attr,
+            }
         }
-        LOGGER.debug(f"Publishing feature for {attr['station_name']} to backend")
-        upsert_collection_item(THINGS_COLLECTION, station_data, method="POST")
+        upsert_collection_item(THINGS_COLLECTION, station_data)
 
-        
+
+# In the load_stations function
+@click.command()
+@click.pass_context
+@cli_helpers.OPTION_VERBOSITY
+def load_stations(ctx, verbosity):
+    """Loads stations into sensorthings backend"""
+    remove_collection(THINGS_COLLECTION)
+
+    client = OregonClient()
+    setup_collection(meta=METADATA)
+
+    # Split the ALL_RELEVANT_STATIONS into two halves since the oregon api can't handle all of them at once
+    half_index = len(ALL_RELEVANT_STATIONS) // 2
+    first_half_stations = ALL_RELEVANT_STATIONS[:half_index]
+    second_half_stations = ALL_RELEVANT_STATIONS[half_index:]
+
+    # Fetch and process the first half of the stations
+    first_station_set = client.fetch_stations(first_half_stations)
+    process_stations(first_station_set)
+
+    # Fetch and process the second half of the stations
+    second_station_set = client.fetch_stations(second_half_stations)
+    process_stations(second_station_set)
 
 
 @click.command()
