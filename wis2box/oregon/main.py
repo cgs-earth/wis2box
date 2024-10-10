@@ -19,7 +19,6 @@
 #
 ###############################################################################
 
-import csv
 import json
 import requests
 import io
@@ -35,8 +34,8 @@ from wis2box.api.backend import load_backend
 from wis2box.api.backend.sensorthings import SensorthingsBackend
 from wis2box.env import API_BACKEND_URL, STORAGE_INCOMING
 from wis2box.oregon.cache import ShelveCache
-from wis2box.oregon.lib import OregonClient, generate_phenomenon_time, parse_date
-from wis2box.oregon.types import ALL_RELEVANT_STATIONS, POTENTIAL_DATASTREAMS, Attributes, StationData, Datastream
+from wis2box.oregon.lib import OregonHttpClient, download_oregon_tsv, generate_phenomenon_time, parse_date, parse_oregon_tsv
+from wis2box.oregon.types import ALL_RELEVANT_STATIONS, POTENTIAL_DATASTREAMS, Attributes, OregonHttpResponse, StationData, Datastream
 from wis2box.storage import put_data
 
 LOGGER = logging.getLogger(__name__)
@@ -44,183 +43,173 @@ LOGGER = logging.getLogger(__name__)
 THINGS_COLLECTION = "Things"
 
 
-# class staRequestBuilder():
-    
+class OregonStaRequestBuilder():
 
+    relevant_stations: List[int]
 
-def get_data_associated_with_station(
-    station_nbr, start_date, end_date, dataset
-) -> Tuple[list[float], list[str]]:
-    """Ingest all data from a station and return the third column."""
-    start_date = "8/24/2024 12:00:00"
-    end_date = "9/30/2024 12:00:00"
-    dataset_param_name = POTENTIAL_DATASTREAMS[dataset]
-    base_url = (
-        "https://apps.wrd.state.or.us/apps/sw/hydro_near_real_time/hydro_download.aspx"
-    )
-    tsv_url = f"{base_url}?{urlencode({'station_nbr': station_nbr, 'start_date': start_date, 'end_date': end_date, 'dataset': dataset_param_name, 'format': 'tsv'})}"
-    print(tsv_url)
-    cache = ShelveCache()
-    response, status_code = cache.get_or_fetch(tsv_url, force_fetch=False)
+    def __init__(self, relevant_stations: List[int]) -> None:
+        self.relevant_stations = relevant_stations
 
-    if status_code != 200:
-        raise RuntimeError(f"Request to {tsv_url} failed with status {status_code}")
+    def _get_upstream_data(self) -> list[StationData]:
+        """Get metadata for all relevant stations."""
+        client = OregonHttpClient()
+        # Split the ALL_RELEVANT_STATIONS into two halves since the oregon api can't handle all of them at once
+        half_index = len(self.relevant_stations) // 2
+        first_half_stations = self.relevant_stations[:half_index]
+        second_half_stations = self.relevant_stations[half_index:]
 
-    put_data(response, f"{STORAGE_INCOMING}/oregon/{station_nbr}_{dataset}.tsv")
+        # Fetch and process the first half of the stations
+        first_station_set: OregonHttpResponse = client.fetch_stations(first_half_stations)
+        second_station_set: OregonHttpResponse = client.fetch_stations(second_half_stations)
+        # create one big dict
 
-    # we just use the third column since the name of the dataset in the
-    # url does not match the name in the result column. However,
-    # it consistently is returned in the third column
-    third_column_data = []
-    date_data: list[str] = []
-    tsv_data = io.StringIO(response.decode("utf-8"))
-    reader = csv.reader(tsv_data, delimiter="\t")
-    try:
-        # Skip the header row if it exists
-        header = next(reader, None)
-        if header is not None:
-            for row in reader:
-                if len(row) >= 3:
-                    if row[2] == "":
-                        third_column_data.append(None)
-                    else:
-                        third_column_data.append(float(row[2]))
+        all_stations = first_station_set["features"] + second_station_set["features"]
+        return all_stations
 
-                date_data.append(parse_date(row[1]))
-    except IndexError:
-        LOGGER.error(f"Failed to parse {tsv_url}")
-        return ([], [])
+    def _get_data_associated_with_station(
+        self, station_nbr, start_date, end_date, dataset
+    ) -> Tuple[list[float], list[str]]:
+        """Ingest all data from a station and return the third column."""
+        start_date = "09/25/2024 12:00:00"
+        end_date = "09/30/2024 12:00:00"
+        response: bytes = download_oregon_tsv(dataset, station_nbr, start_date, end_date)
+        # put_data(response, f"{STORAGE_INCOMING}/oregon/{station_nbr}_{dataset}.tsv")
+        sensor_values, dates = parse_oregon_tsv(response)
+        return (sensor_values, dates)
 
-    return (third_column_data, date_data)
+    def _generate_datastreams_and_observations(
+        self, attr: Attributes,
+    ) -> Tuple[list[Datastream], list[dict]]:
+        datastreams = []
+        observations: list[dict] = []
+        id = 0
+        for stream in POTENTIAL_DATASTREAMS:
+            if stream not in attr or str(attr[stream]) != "1":
+                continue
 
+            datapoints, observation_times = self._get_data_associated_with_station(
+                station_nbr=attr["station_nbr"],
+                start_date=attr["period_of_record_start_date"],
+                end_date=attr["period_of_record_end_date"],
+                dataset=stream,
+            )
 
-def generate_datastreams_and_observations(
-    attr: Attributes,
-) -> Tuple[list[Datastream], list[dict]]:
-    datastreams = []
-    observations: list[dict] = []
-    id = 0
-    for stream in POTENTIAL_DATASTREAMS:
-        if stream not in attr or str(attr[stream]) != "1":
-            continue
-
-        datapoints, time_for_datapoints = get_data_associated_with_station(
-            station_nbr=attr["station_nbr"],
-            start_date=attr["period_of_record_start_date"],
-            end_date=attr["period_of_record_end_date"],
-            dataset=stream,
-        )
-
-        for datapoint, time_for_datapoint in zip(datapoints, time_for_datapoints):
-            sta_formatted_data = {
-                "resultTime": time_for_datapoint,
-                "Datastream": {"@iot.id": f"{attr['station_nbr']}{id}"},
-                "result": datapoint,
-                "FeatureOfInterest": {
-                    "name": attr["station_name"],
-                    "description": attr["station_name"],
-                    "encodingType": "application/vnd.geo+json",
-                    "feature": {
-                        "type": "Point",
-                        "coordinates": [
-                            attr["longitude_dec"],
-                            attr["latitude_dec"],
-                            attr["elevation"],
-                        ],
-                    },
-                },
-            }
-            observations.append(sta_formatted_data)
-
-
-        time = generate_phenomenon_time(attr)
-        property = stream.removesuffix("_available").removesuffix("_avail")
-        datastream = {
-            "@iot.id": f"{attr['station_nbr']}{id}",
-            "name": property,
-            "description": property,
-            "observationType": "http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement",
-            "unitOfMeasurement": {
-                "name": "Unknown",
-                "symbol": "Unknown",
-                "definition": "Unknown",
-            },
-            "ObservedProperty": {
-                "name": property,
-                "description": property,
-                "definition": "Unknown",
-            },
-            "Sensor": {
-                "name": "Unkown",
-                "description": "Unknown",
-                "encodingType": "Unknown",
-                "metadata": "Unknown",
-            },
-        }
-        if time:
-            datastream["phenomenonTime"] = time
-
-        datastreams.append(datastream)
-        id += 1
-
-    return datastreams, observations
-
-
-def process_stations(result: dict):
-    features: list[StationData] = result.get("features", [])
-
-    for station in features:
-        attr = station["attributes"]
-
-        sta_datastreams, sta_observations = generate_datastreams_and_observations(attr)
-        if not sta_datastreams and not sta_observations:
-            continue
-
-        station_data = {
-            "name": attr["station_name"],
-            "@iot.id": f"{attr['station_nbr']}",
-            "description": attr["station_name"],
-            "Locations": [
-                {
-                    "name": attr["station_name"],
-                    "description": attr["station_name"],
-                    "encodingType": "application/vnd.geo+json",
-                    "location": {
-                        "type": "Point",
-                        "coordinates": [
-                            attr["longitude_dec"],
-                            attr["latitude_dec"],
-                            attr["elevation"],
-                        ],
+            for datapoint, obs_time in zip(datapoints, observation_times):
+                sta_formatted_data = {
+                    "resultTime": obs_time,
+                    "Datastream": {"@iot.id": f"{attr['station_nbr']}{id}"},
+                    "result": datapoint,
+                    "FeatureOfInterest": {
+                        "name": attr["station_name"],
+                        "description": attr["station_name"],
+                        "encodingType": "application/vnd.geo+json",
+                        "feature": {
+                            "type": "Point",
+                            "coordinates": [
+                                attr["longitude_dec"],
+                                attr["latitude_dec"],
+                                attr["elevation"],
+                            ],
+                        },
                     },
                 }
-            ],
-            "Datastreams": sta_datastreams,
-            "properties": {
-                **attr,
-            },
-        }
-        upsert_collection_item(THINGS_COLLECTION, station_data)
+                observations.append(sta_formatted_data)
 
-        batch_request = {"requests": []}
 
-        for obs in sta_observations:
-            batch_request["requests"].append({
-                "id": obs["Datastream"]["@iot.id"],
-                "method": "post",
-                "url": "Observations",
-                "body": obs
-            })
+            time = generate_phenomenon_time(attr)
+            property = stream.removesuffix("_available").removesuffix("_avail")
+            datastream = {
+                "@iot.id": f"{attr['station_nbr']}{id}",
+                "name": property,
+                "description": property,
+                "observationType": "http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement",
+                "unitOfMeasurement": {
+                    "name": "Unknown",
+                    "symbol": "Unknown",
+                    "definition": "Unknown",
+                },
+                "ObservedProperty": {
+                    "name": property,
+                    "description": property,
+                    "definition": "Unknown",
+                },
+                "Sensor": {
+                    "name": "Unkown",
+                    "description": "Unknown",
+                    "encodingType": "Unknown",
+                    "metadata": "Unknown",
+                },
+            }
+            if time:
+                datastream["phenomenonTime"] = time
 
-        r = requests.post(
-            f"{API_BACKEND_URL}/$batch",
-            data=json.dumps(batch_request),
-            headers={"Content-Type": "application/json"},
-        )
+            datastreams.append(datastream)
+            id += 1
 
-        if r.status_code != 201:
-            LOGGER.error(f"Failed to create observation: {r.content}")
+        return datastreams, observations
 
+
+    def send(self) -> None:
+        response = self._get_upstream_data()
+        self._insert_to_FROST(response)
+
+    def _generate_station_data(self, attr: Attributes, datastreams: list[Datastream]) -> dict:
+        return  {
+                "name": attr["station_name"],
+                "@iot.id": f"{attr['station_nbr']}",
+                "description": attr["station_name"],
+                "Locations": [
+                    {
+                        "name": attr["station_name"],
+                        "description": attr["station_name"],
+                        "encodingType": "application/vnd.geo+json",
+                        "location": {
+                            "type": "Point",
+                            "coordinates": [
+                                attr["longitude_dec"],
+                                attr["latitude_dec"],
+                                attr["elevation"],
+                            ],
+                        },
+                    }
+                ],
+                "Datastreams": datastreams,
+                "properties": {
+                    **attr,
+                },
+            }
+
+    def _insert_to_FROST(self, all_stations: list[StationData]) -> None:
+
+        for station in all_stations:
+            attr = station["attributes"]
+
+            sta_datastreams, sta_observations = self._generate_datastreams_and_observations(attr)
+
+            station_data = self._generate_station_data(attr, sta_datastreams)
+            upsert_collection_item(THINGS_COLLECTION, station_data)
+
+            if not sta_datastreams and not sta_observations:
+                continue
+
+            batch_request = {"requests": []}
+
+            for obs in sta_observations:
+                batch_request["requests"].append({
+                    "id": obs["Datastream"]["@iot.id"],
+                    "method": "post",
+                    "url": "Observations",
+                    "body": obs
+                })
+
+            r = requests.post(
+                f"{API_BACKEND_URL}/$batch",
+                data=json.dumps(batch_request),
+                headers={"Content-Type": "application/json"},
+            )
+
+            if r.status_code != 201:
+                LOGGER.error(f"Failed to create observation: {r.content}")
 
 
 # In the load_stations function
@@ -247,22 +236,11 @@ def load(ctx, verbosity, station, begin, end):
         "id_field": "@iot.id",
         "title_field": "name",
     }
-
-    client = OregonClient()
     setup_collection(meta=METADATA)
 
-    # Split the ALL_RELEVANT_STATIONS into two halves since the oregon api can't handle all of them at once
-    half_index = len(ALL_RELEVANT_STATIONS) // 2
-    first_half_stations = ALL_RELEVANT_STATIONS[:half_index]
-    second_half_stations = ALL_RELEVANT_STATIONS[half_index:]
+    builder = OregonStaRequestBuilder(relevant_stations=ALL_RELEVANT_STATIONS)
+    builder.send()
 
-    # Fetch and process the first half of the stations
-    first_station_set = client.fetch_stations(first_half_stations)
-    process_stations(first_station_set)
-
-    # Fetch and process the second half of the stations
-    second_station_set = client.fetch_stations(second_half_stations)
-    process_stations(second_station_set)
 
 
 @click.command()

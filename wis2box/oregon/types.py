@@ -159,6 +159,8 @@ ALL_RELEVANT_STATIONS = [
 ]
 
 
+
+
 class Attributes(TypedDict):
     OBJECTID: int
     lkp_gaging_station_id: int
@@ -274,3 +276,8 @@ Datastream = TypedDict(
         "Sensor": dict[str, str],
     },
 )
+
+class OregonHttpResponse(TypedDict):
+    geometryType: str
+    fields: list
+    features: list[StationData]

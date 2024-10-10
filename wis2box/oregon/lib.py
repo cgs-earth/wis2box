@@ -1,11 +1,34 @@
+import csv
 import datetime
+import io
 from requests import Session
 from urllib.parse import urlencode
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
-from wis2box.oregon.types import Attributes
+from wis2box.oregon.cache import ShelveCache
+from wis2box.oregon.types import POTENTIAL_DATASTREAMS, Attributes, OregonHttpResponse
 
+def parse_oregon_tsv(response: bytes) -> Tuple[list[float], list[str]]:
+    # we just use the third column since the name of the dataset in the
+    # url does not match the name in the result column. However,
+    # it consistently is returned in the third column
+    third_column_data = []
+    date_data: list[str] = []
+    tsv_data = io.StringIO(response.decode("utf-8"))
+    reader = csv.reader(tsv_data, delimiter="\t")
+    # Skip the header row if it exists
+    header = next(reader, None)
+    if header is not None:
+        for row in reader:
+            if len(row) >= 3:
+                if row[2] == "":
+                    third_column_data.append(None)
+                else:
+                    third_column_data.append(float(row[2]))
 
+            date_data.append(parse_date(row[1]))
+
+    return (third_column_data, date_data)
 
 def generate_phenomenon_time(attributes: Attributes) -> Optional[str]:
     if attributes["period_of_record_start_date"] is not None:
@@ -36,13 +59,38 @@ def parse_date(date_str: str) -> str:
             continue
     raise ValueError(f"Date {date_str} does not match any known formats")
 
-class OregonClient:
+def download_oregon_tsv(dataset: str, station_nbr: str, start_date: str, end_date: str) -> bytes:
+    dataset_param_name = POTENTIAL_DATASTREAMS[dataset]
+    base_url = (
+        "https://apps.wrd.state.or.us/apps/sw/hydro_near_real_time/hydro_download.aspx"
+    )
+    params = {
+        "station_nbr": station_nbr,
+        "start_date": start_date,
+        "end_date": end_date,
+        "dataset": dataset_param_name,
+        "format": "tsv",
+        "units": "" # this is required
+    }
+    encoded_params = urlencode(params)
+    tsv_url = f"{base_url}?{encoded_params}"
+
+    cache = ShelveCache()
+    response, status_code = cache.get_or_fetch(tsv_url, force_fetch=True)
+
+    if status_code != 200 or "An Error Has Occured" in response.decode("utf-8"):
+        raise RuntimeError(f"Request to {tsv_url} failed with status {status_code} with params {params}")
+
+    return response
+
+
+class OregonHttpClient:
     BASE_URL: str = "https://gis.wrd.state.or.us/server/rest/services/dynamic/Gaging_Stations_WGS84/FeatureServer/2/query?"
 
     def __init__(self):
         self.session = Session()
 
-    def fetch_stations(self, station_numbers: List[int]) -> dict:
+    def fetch_stations(self, station_numbers: List[int]) -> OregonHttpResponse:
         """Fetches stations given a list of station numbers."""
         params = {
             "where": self.format_where_param(station_numbers),
