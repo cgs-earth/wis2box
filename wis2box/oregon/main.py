@@ -154,6 +154,7 @@ class OregonStaRequestBuilder():
         self._insert_to_FROST(response)
 
     def _generate_station_data(self, attr: Attributes, datastreams: list[Datastream]) -> dict:
+        """Generate data for the body of a POST request for Locations/ in FROST"""
         return  {
                 "name": attr["station_name"],
                 "@iot.id": f"{attr['station_nbr']}",

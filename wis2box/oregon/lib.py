@@ -76,7 +76,7 @@ def download_oregon_tsv(dataset: str, station_nbr: str, start_date: str, end_dat
     tsv_url = f"{base_url}?{encoded_params}"
 
     cache = ShelveCache()
-    response, status_code = cache.get_or_fetch(tsv_url, force_fetch=True)
+    response, status_code = cache.get_or_fetch(tsv_url, force_fetch=False)
 
     if status_code != 200 or "An Error Has Occured" in response.decode("utf-8"):
         raise RuntimeError(f"Request to {tsv_url} failed with status {status_code} with params {params}")
