@@ -44,6 +44,10 @@ LOGGER = logging.getLogger(__name__)
 THINGS_COLLECTION = "Things"
 
 
+# class staRequestBuilder():
+    
+
+
 def get_data_associated_with_station(
     station_nbr, start_date, end_date, dataset
 ) -> Tuple[list[float], list[str]]:
@@ -57,7 +61,7 @@ def get_data_associated_with_station(
     tsv_url = f"{base_url}?{urlencode({'station_nbr': station_nbr, 'start_date': start_date, 'end_date': end_date, 'dataset': dataset_param_name, 'format': 'tsv'})}"
     print(tsv_url)
     cache = ShelveCache()
-    response, status_code = cache.get_or_fetch(tsv_url, force_fetch=True)
+    response, status_code = cache.get_or_fetch(tsv_url, force_fetch=False)
 
     if status_code != 200:
         raise RuntimeError(f"Request to {tsv_url} failed with status {status_code}")
@@ -198,15 +202,24 @@ def process_stations(result: dict):
         }
         upsert_collection_item(THINGS_COLLECTION, station_data)
 
-        for observation in sta_observations:
-            r = requests.post(
-                f"{API_BACKEND_URL}/Observations",
-                data=json.dumps(observation),
-                headers={"Content-Type": "application/json"},
-            )
+        batch_request = {"requests": []}
 
-            if r.status_code != 201:
-                LOGGER.error(f"Failed to create observation: {r.content}")
+        for obs in sta_observations:
+            batch_request["requests"].append({
+                "id": obs["Datastream"]["@iot.id"],
+                "method": "post",
+                "url": "Observations",
+                "body": obs
+            })
+
+        r = requests.post(
+            f"{API_BACKEND_URL}/$batch",
+            data=json.dumps(batch_request),
+            headers={"Content-Type": "application/json"},
+        )
+
+        if r.status_code != 201:
+            LOGGER.error(f"Failed to create observation: {r.content}")
 
 
 
