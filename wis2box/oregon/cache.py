@@ -1,0 +1,51 @@
+import json
+import logging
+import math
+import shelve
+from typing import ClassVar, Literal, Optional, Union
+from typing_extensions import assert_never
+import requests
+from datetime import timedelta
+
+HEADERS = {"accept": "application/vnd.api+json"}
+
+LOGGER = logging.getLogger(__name__)
+
+class ShelveCache():
+    db: ClassVar[str] = "oregondb"
+
+    def set(self, url: str, json_data: dict, _ttl: Optional[timedelta] = None):
+        with shelve.open(ShelveCache.db, "w") as db:
+            db[url] = json_data
+
+    def get_or_fetch(self, url: str):
+        print(url)
+        with shelve.open(ShelveCache.db) as db:
+            if url in db:
+                LOGGER.debug(f'Using cache for {url}')
+                return db[url]
+            else:
+                res = requests.get(url, headers=HEADERS).content
+                db[url] = res
+                return res
+
+    def reset(self):
+        with shelve.open(ShelveCache.db, "w") as db:
+            for key in db:
+                del db[key]
+
+    def clear(self, url: str):
+        with shelve.open(ShelveCache.db, "w") as db:
+            if url not in db:
+                return
+
+            del db[url]
+
+    def contains(self, url: str) -> bool:
+        with shelve.open(ShelveCache.db) as db:
+            return url in db
+
+    def get(self, url: str):
+        with shelve.open(ShelveCache.db) as db:
+            return db[url]
+
