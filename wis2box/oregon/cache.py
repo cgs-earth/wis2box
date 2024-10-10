@@ -2,7 +2,7 @@ import json
 import logging
 import math
 import shelve
-from typing import ClassVar, Literal, Optional, Union
+from typing import ClassVar, Literal, Optional, Tuple, Union
 from typing_extensions import assert_never
 import requests
 from datetime import timedelta
@@ -18,16 +18,15 @@ class ShelveCache():
         with shelve.open(ShelveCache.db, "w") as db:
             db[url] = json_data
 
-    def get_or_fetch(self, url: str):
-        print(url)
+    def get_or_fetch(self, url: str, force_fetch: bool = False) -> Tuple[bytes, int]:
         with shelve.open(ShelveCache.db) as db:
-            if url in db:
+            if url in db and not force_fetch:
                 LOGGER.debug(f'Using cache for {url}')
-                return db[url]
+                return db[url], 200
             else:
-                res = requests.get(url, headers=HEADERS).content
-                db[url] = res
-                return res
+                res = requests.get(url, headers=HEADERS)
+                db[url] = res.content
+                return res.content, res.status_code
 
     def reset(self):
         with shelve.open(ShelveCache.db, "w") as db:

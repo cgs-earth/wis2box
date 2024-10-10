@@ -26,8 +26,6 @@ import io
 from typing import Tuple, TypedDict, Optional, List
 import click
 import logging
-from requests import Session
-import datetime
 from wis2box import cli_helpers, data
 from wis2box.api import remove_collection, setup_collection, upsert_collection_item
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -37,58 +35,13 @@ from wis2box.api.backend import load_backend
 from wis2box.api.backend.sensorthings import SensorthingsBackend
 from wis2box.env import API_BACKEND_URL, STORAGE_INCOMING
 from wis2box.oregon.cache import ShelveCache
+from wis2box.oregon.lib import OregonClient, generate_phenomenon_time, parse_date
 from wis2box.oregon.types import ALL_RELEVANT_STATIONS, POTENTIAL_DATASTREAMS, Attributes, StationData, Datastream
 from wis2box.storage import put_data
 
 LOGGER = logging.getLogger(__name__)
 
 THINGS_COLLECTION = "Things"
-
-class OregonClient:
-    BASE_URL: str = "https://gis.wrd.state.or.us/server/rest/services/dynamic/Gaging_Stations_WGS84/FeatureServer/2/query?"
-
-    def __init__(self):
-        self.session = Session()
-
-    def fetch_stations(self, station_numbers: List[int]) -> dict:
-        """Fetches stations given a list of station numbers."""
-        params = {
-            "where": self.format_where_param(station_numbers),
-            "outFields": "*",
-            "f": "json",
-        }
-        url = self.BASE_URL + urlencode(params)
-        response = self.session.get(url)
-        if response.ok:
-            return response.json()
-        else:
-            raise RuntimeError(response.url)
-
-    def format_where_param(self, station_numbers: List[int]) -> str:
-        wrapped_with_quotes = [f"'{station}'" for station in station_numbers]
-        formatted_stations = " , ".join(wrapped_with_quotes)
-        query = f"station_nbr IN ({formatted_stations})"
-        return query
-
-
-def generate_phenomenon_time(attributes: Attributes) -> Optional[str]:
-    if attributes["period_of_record_start_date"] is not None:
-        start = datetime.datetime.fromtimestamp(
-            attributes["period_of_record_start_date"] / 1000
-        ).isoformat()
-    else:
-        start = ".."  # Default value if start date is None
-
-    if attributes["period_of_record_end_date"] is not None:
-        end = datetime.datetime.fromtimestamp(
-            attributes["period_of_record_end_date"] / 1000
-        ).isoformat()
-    else:
-        end = ".."  # Default value if end date is None
-
-    phenomenonTime = start + "/" + end if start != ".." and end == ".." else None
-    assert phenomenonTime != ""
-    return phenomenonTime
 
 
 def get_data_associated_with_station(
@@ -97,16 +50,17 @@ def get_data_associated_with_station(
     """Ingest all data from a station and return the third column."""
     start_date = "8/24/2024 12:00:00"
     end_date = "9/30/2024 12:00:00"
-    dataset = "MDF"
+    dataset_param_name = POTENTIAL_DATASTREAMS[dataset]
     base_url = (
         "https://apps.wrd.state.or.us/apps/sw/hydro_near_real_time/hydro_download.aspx"
     )
-    # TODO change MDF to the dataset name; these don't exactly match up however
-    tsv_url = f"{base_url}?{urlencode({'station_nbr': station_nbr, 'start_date': start_date, 'end_date': end_date, 'dataset': dataset, 'format': 'tsv'})}"
-
-    # print(tsv_url)
+    tsv_url = f"{base_url}?{urlencode({'station_nbr': station_nbr, 'start_date': start_date, 'end_date': end_date, 'dataset': dataset_param_name, 'format': 'tsv'})}"
+    print(tsv_url)
     cache = ShelveCache()
-    response = cache.get_or_fetch(tsv_url)
+    response, status_code = cache.get_or_fetch(tsv_url, force_fetch=True)
+
+    if status_code != 200:
+        raise RuntimeError(f"Request to {tsv_url} failed with status {status_code}")
 
     put_data(response, f"{STORAGE_INCOMING}/oregon/{station_nbr}_{dataset}.tsv")
 
@@ -117,17 +71,21 @@ def get_data_associated_with_station(
     date_data: list[str] = []
     tsv_data = io.StringIO(response.decode("utf-8"))
     reader = csv.reader(tsv_data, delimiter="\t")
+    try:
+        # Skip the header row if it exists
+        header = next(reader, None)
+        if header is not None:
+            for row in reader:
+                if len(row) >= 3:
+                    if row[2] == "":
+                        third_column_data.append(None)
+                    else:
+                        third_column_data.append(float(row[2]))
 
-    # Skip the header row if it exists
-    header = next(reader, None)
-    if header is not None:
-        for row in reader:
-            if len(row) >= 3:
-                if row[2] == "":
-                    third_column_data.append(None)
-                else:
-                    third_column_data.append(float(row[2]))
-            date_data.append(row[1])
+                date_data.append(parse_date(row[1]))
+    except IndexError:
+        LOGGER.error(f"Failed to parse {tsv_url}")
+        return ([], [])
 
     return (third_column_data, date_data)
 
@@ -136,37 +94,40 @@ def generate_datastreams_and_observations(
     attr: Attributes,
 ) -> Tuple[list[Datastream], list[dict]]:
     datastreams = []
-    observations = []
+    observations: list[dict] = []
     id = 0
     for stream in POTENTIAL_DATASTREAMS:
         if stream not in attr or str(attr[stream]) != "1":
             continue
 
         datapoints, time_for_datapoints = get_data_associated_with_station(
-            station_nbr=attr["station_name"],
+            station_nbr=attr["station_nbr"],
             start_date=attr["period_of_record_start_date"],
             end_date=attr["period_of_record_end_date"],
             dataset=stream,
         )
 
-        sta_formatted_data = {
-            "resultTime": "2014-12-31T11:59:59.00+08:00",
-            "Datastream": {"@iot.id": f"{attr['station_nbr']}{id}"},
-            "result": datapoints,
-            "FeatureOfInterest": {
-                "name": attr["station_name"],
-                "description": attr["station_name"],
-                "encodingType": "application/vnd.geo+json",
-                "feature": {
-                    "type": "Point",
-                    "coordinates": [
-                        attr["longitude_dec"],
-                        attr["latitude_dec"],
-                        attr["elevation"],
-                    ],
+        for datapoint, time_for_datapoint in zip(datapoints, time_for_datapoints):
+            sta_formatted_data = {
+                "resultTime": time_for_datapoint,
+                "Datastream": {"@iot.id": f"{attr['station_nbr']}{id}"},
+                "result": datapoint,
+                "FeatureOfInterest": {
+                    "name": attr["station_name"],
+                    "description": attr["station_name"],
+                    "encodingType": "application/vnd.geo+json",
+                    "feature": {
+                        "type": "Point",
+                        "coordinates": [
+                            attr["longitude_dec"],
+                            attr["latitude_dec"],
+                            attr["elevation"],
+                        ],
+                    },
                 },
-            },
-        }
+            }
+            observations.append(sta_formatted_data)
+
 
         time = generate_phenomenon_time(attr)
         property = stream.removesuffix("_available").removesuffix("_avail")
@@ -196,7 +157,6 @@ def generate_datastreams_and_observations(
             datastream["phenomenonTime"] = time
 
         datastreams.append(datastream)
-        observations.append(sta_formatted_data)
         id += 1
 
     return datastreams, observations
@@ -209,6 +169,8 @@ def process_stations(result: dict):
         attr = station["attributes"]
 
         sta_datastreams, sta_observations = generate_datastreams_and_observations(attr)
+        if not sta_datastreams and not sta_observations:
+            continue
 
         station_data = {
             "name": attr["station_name"],

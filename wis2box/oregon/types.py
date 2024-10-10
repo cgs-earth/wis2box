@@ -1,34 +1,32 @@
 from typing import List, Optional, TypedDict
 
-POTENTIAL_DATASTREAMS = [
-    "stage_instantaneous_available",
-    "flow_instantaneous_available",
-    "mean_daily_flow_available",
-    "measured_flow_available",
-    "volume_midnight_available",
-    "stage_midnight_available",
-    "mean_daily_volume_available",
-    "mean_daily_stage_available",
-    "rating_curve_available",
-    "water_temp_instantaneous_avail",
-    "water_temp_measurement_avail",
-    "water_temp_mean_available",
-    "water_temp_max_available",
-    "water_temp_min_available",
-    "air_temp_instantaneous_avail",
-    "air_temp_mean_available",
-    "air_temp_max_available",
-    "air_temp_min_available",
-    "precipitation_available",
-]
-
-DATASTREAM_TO_DOWNLOAD_NAME = {
+POTENTIAL_DATASTREAMS = {
+    "stage_instantaneous_available" : "Instantaneous_Stage",
+    "flow_instantaneous_available" : "Instantaneous_Flow",
+    "mean_daily_flow_available": "MDF",
     "water_temp_max_available": "WTEMP_MAX",
     "water_temp_min_available": "WTEMP_MIN",
     "water_temp_mean_available": "WTEMP_MEAN",
     "water_temp_instantaneous_avail": "WTEMP15",
-    "water_temp_measurement_avail": "WTEMP_MEASURE",
+    "water_temp_measurement_avail": "WTEMP_MEASURE"
 }
+
+# "measured_flow_available",
+# "volume_midnight_available",
+# "stage_midnight_available",
+# "mean_daily_volume_available",
+# "mean_daily_stage_available",
+# "rating_curve_available",
+# "water_temp_instantaneous_avail",
+# "water_temp_measurement_avail",
+# "water_temp_mean_available",
+# "water_temp_max_available",
+# "water_temp_min_available",
+# "air_temp_instantaneous_avail",
+# "air_temp_mean_available",
+# "air_temp_max_available",
+# "air_temp_min_available",
+# "precipitation_available",
 
 ALL_RELEVANT_STATIONS = [
     10378500,
