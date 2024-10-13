@@ -1,14 +1,20 @@
 import csv
 import datetime
 import io
+import json
+import logging
+import os
 from requests import Session
 from urllib.parse import urlencode
-from typing import List, Optional, Tuple
+from typing import ClassVar, List, Optional, Tuple, TypedDict
 
 from wis2box.oregon.cache import ShelveCache
 from wis2box.oregon.types import POTENTIAL_DATASTREAMS, Attributes, OregonHttpResponse
 
+LOGGER = logging.getLogger(__name__)
+
 def parse_oregon_tsv(response: bytes) -> Tuple[list[float], list[str]]:
+    """Return the data column and the date column for a given tsv response"""
     # we just use the third column since the name of the dataset in the
     # url does not match the name in the result column. However,
     # it consistently is returned in the third column
@@ -60,6 +66,7 @@ def parse_date(date_str: str) -> str:
     raise ValueError(f"Date {date_str} does not match any known formats")
 
 def download_oregon_tsv(dataset: str, station_nbr: str, start_date: str, end_date: str) -> bytes:
+    """Get the tsv data for a specific dataset for a specific station in a given date range"""
     dataset_param_name = POTENTIAL_DATASTREAMS[dataset]
     base_url = (
         "https://apps.wrd.state.or.us/apps/sw/hydro_near_real_time/hydro_download.aspx"
@@ -109,3 +116,54 @@ class OregonHttpClient:
         formatted_stations = " , ".join(wrapped_with_quotes)
         query = f"station_nbr IN ({formatted_stations})"
         return query
+
+
+def assert_valid_date(date_str: Optional[str]) -> None:
+    """defensively assert that a date string is in the proper format for the Oregon API"""
+    if not date_str:
+        return
+    try:
+        datetime.datetime.strptime(date_str, "%m/%d/%Y %I:%M:%S %p")
+    except ValueError:
+        raise ValueError(f"Date string '{date_str}' could not be parsed into the format that the Oregon API expects")
+
+def to_oregon_datetime(date_str: datetime.datetime) -> str:
+    """Convert a datetime into the format that the Oregon API expects"""
+    return datetime.datetime.strftime(date_str, "%m/%d/%Y %I:%M:%S %p")
+
+class UpdateMetadata(TypedDict):
+    data_start: str
+    data_end: str
+
+class DataUpdateHelper():
+    """Helper class to determine what to download based on a local metadata file"""
+
+    metadata_file: ClassVar[str] = "oregon_metadata.json"
+
+    def __init__(self):
+        # check if metadata.json exists if not create it
+        if not os.path.exists(self.metadata_file):
+            with open(self.metadata_file, "w") as f:
+                json.dump({"data_start": "", "data_end": ""}, f)
+
+    def get_range(self) -> Tuple[str, str]:
+        """Get the range of data that has been downloaded"""
+        with open(self.metadata_file, "r") as f:
+            metadata: UpdateMetadata = json.load(f)
+        assert_valid_date(metadata["data_start"])
+        assert_valid_date(metadata["data_end"])
+        return (metadata["data_start"], metadata["data_end"])
+
+    def update_range(self, start: str, end: str):
+        """Update the range of dates of data that has been downloaded"""
+        # make sure that start and end are valid dates
+        assert_valid_date(start)
+        assert_valid_date(end)
+
+        with open(self.metadata_file, "r") as f:
+            metadata: UpdateMetadata = json.load(f)
+
+        metadata["data_start"] = start
+        metadata["data_end"] = end
+        with open(self.metadata_file, "w") as f:
+            json.dump(metadata, f)

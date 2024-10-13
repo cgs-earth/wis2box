@@ -19,22 +19,17 @@
 #
 ###############################################################################
 
+from datetime import datetime
 import json
 import requests
-import io
-from typing import Tuple, TypedDict, Optional, List
+from typing import Tuple, Optional, List
 import click
 import logging
-from wis2box import cli_helpers, data
+from wis2box import cli_helpers
 from wis2box.api import remove_collection, setup_collection, upsert_collection_item
-from urllib.parse import parse_qs, urlencode, urlparse
-from requests import Session
 
-from wis2box.api.backend import load_backend
-from wis2box.api.backend.sensorthings import SensorthingsBackend
 from wis2box.env import API_BACKEND_URL, STORAGE_INCOMING
-from wis2box.oregon.cache import ShelveCache
-from wis2box.oregon.lib import OregonHttpClient, download_oregon_tsv, generate_phenomenon_time, parse_date, parse_oregon_tsv
+from wis2box.oregon.lib import DataUpdateHelper, OregonHttpClient, assert_valid_date, download_oregon_tsv, generate_phenomenon_time, parse_oregon_tsv, to_oregon_datetime
 from wis2box.oregon.types import ALL_RELEVANT_STATIONS, POTENTIAL_DATASTREAMS, Attributes, OregonHttpResponse, StationData, Datastream
 from wis2box.storage import put_data
 
@@ -44,11 +39,19 @@ THINGS_COLLECTION = "Things"
 
 
 class OregonStaRequestBuilder():
+    """
+    Helper class for constructing the sensorthings API requests for 
+    inserting oregon data into the sensorthings FROST server
+    """
 
     relevant_stations: List[int]
+    data_start: Optional[str]
+    data_end: Optional[str]
 
-    def __init__(self, relevant_stations: List[int]) -> None:
+    def __init__(self, relevant_stations: List[int], data_start: Optional[str], data_end: Optional[str]) -> None:
         self.relevant_stations = relevant_stations
+        self.data_start = data_start
+        self.data_end = data_end
 
     def _get_upstream_data(self) -> list[StationData]:
         """Get metadata for all relevant stations."""
@@ -61,8 +64,7 @@ class OregonStaRequestBuilder():
         # Fetch and process the first half of the stations
         first_station_set: OregonHttpResponse = client.fetch_stations(first_half_stations)
         second_station_set: OregonHttpResponse = client.fetch_stations(second_half_stations)
-        # create one big dict
-
+        # create one larger dictionary that merges the two
         all_stations = first_station_set["features"] + second_station_set["features"]
         return all_stations
 
@@ -70,10 +72,10 @@ class OregonStaRequestBuilder():
         self, station_nbr, start_date, end_date, dataset
     ) -> Tuple[list[float], list[str]]:
         """Ingest all data from a station and return the third column."""
-        start_date = "09/25/2024 12:00:00"
+        start_date = "09/25/2024 12:00:00" # TODO: remove this in prod; here just to prevent overfetching in dev
         end_date = "09/30/2024 12:00:00"
         response: bytes = download_oregon_tsv(dataset, station_nbr, start_date, end_date)
-        # put_data(response, f"{STORAGE_INCOMING}/oregon/{station_nbr}_{dataset}.tsv")
+        put_data(response, f"{STORAGE_INCOMING}/oregon/{station_nbr}_{dataset}_{start_date}_{end_date}.tsv")
         sensor_values, dates = parse_oregon_tsv(response)
         return (sensor_values, dates)
 
@@ -239,11 +241,29 @@ def load(ctx, verbosity, station, begin, end):
     }
     setup_collection(meta=METADATA)
 
-    builder = OregonStaRequestBuilder(relevant_stations=ALL_RELEVANT_STATIONS)
+    data_range_setter = DataUpdateHelper() 
+    data_range_setter.update_range(begin, end)
+
+    builder = OregonStaRequestBuilder(relevant_stations=ALL_RELEVANT_STATIONS, data_start=begin, data_end=end)
     builder.send()
 
 
-
+@click.command()
+@click.pass_context
+@cli_helpers.OPTION_VERBOSITY
+def update(ctx, verbosity):
+    """Update the data to include new data since the last crawl"""
+    update_helper = DataUpdateHelper()
+    _, end = update_helper.get_range()
+    # make sure the start and end are valid dates
+    assert_valid_date(end)
+    new_start = end # new start should be set to the previous end in order to only get new data
+   
+    # Get the current date and time
+    new_end = to_oregon_datetime(datetime.now())
+    builder = OregonStaRequestBuilder(relevant_stations=ALL_RELEVANT_STATIONS, data_start=new_start, data_end=new_end)
+    builder.send()
+    
 @click.command()
 @click.pass_context
 @cli_helpers.OPTION_VERBOSITY
@@ -289,10 +309,11 @@ def publish(ctx, verbosity):
 
 @click.group()
 def oregon():
-    """Station metadata management"""
+    """Station metadata management for Oregon Water Resources"""
     pass
 
 oregon.add_command(publish)
 oregon.add_command(load)
 oregon.add_command(delete)
+oregon.add_command(update)
 
