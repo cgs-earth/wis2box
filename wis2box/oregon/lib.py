@@ -13,18 +13,21 @@ from wis2box.oregon.types import POTENTIAL_DATASTREAMS, Attributes, OregonHttpRe
 
 LOGGER = logging.getLogger(__name__)
 
-def parse_oregon_tsv(response: bytes) -> Tuple[list[float], list[str]]:
+def parse_oregon_tsv(response: bytes) -> Tuple[list[float], str, list[str]]:
     """Return the data column and the date column for a given tsv response"""
     # we just use the third column since the name of the dataset in the
     # url does not match the name in the result column. However,
     # it consistently is returned in the third column
     third_column_data = []
     date_data: list[str] = []
+    units = "Unknown"
     tsv_data = io.StringIO(response.decode("utf-8"))
     reader = csv.reader(tsv_data, delimiter="\t")
     # Skip the header row if it exists
     header = next(reader, None)
+        
     if header is not None:
+        units = header[2].split("_")[-1]
         for row in reader:
             if len(row) >= 3:
                 if row[2] == "":
@@ -34,7 +37,7 @@ def parse_oregon_tsv(response: bytes) -> Tuple[list[float], list[str]]:
 
             date_data.append(parse_date(row[1]))
 
-    return (third_column_data, date_data)
+    return (third_column_data, units, date_data)
 
 def generate_phenomenon_time(attributes: Attributes) -> Optional[str]:
     if attributes["period_of_record_start_date"] is not None:

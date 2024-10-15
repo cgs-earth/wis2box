@@ -70,14 +70,14 @@ class OregonStaRequestBuilder():
 
     def _get_data_associated_with_station(
         self, station_nbr, start_date, end_date, dataset
-    ) -> Tuple[list[float], list[str]]:
+    ) -> Tuple[list[float], str, list[str]]:
         """Ingest all data from a station and return the third column."""
         start_date = "09/25/2024 12:00:00" # TODO: remove this in prod; here just to prevent overfetching in dev
         end_date = "09/30/2024 12:00:00"
         response: bytes = download_oregon_tsv(dataset, station_nbr, start_date, end_date)
         put_data(response, f"{STORAGE_INCOMING}/oregon/{station_nbr}_{dataset}_{start_date}_{end_date}.tsv")
-        sensor_values, dates = parse_oregon_tsv(response)
-        return (sensor_values, dates)
+        sensor_values, units, dates = parse_oregon_tsv(response)
+        return (sensor_values, units, dates)
 
     def _generate_datastreams_and_observations(
         self, attr: Attributes,
@@ -89,7 +89,7 @@ class OregonStaRequestBuilder():
             if stream not in attr or str(attr[stream]) != "1":
                 continue
 
-            datapoints, observation_times = self._get_data_associated_with_station(
+            datapoints, units, observation_times = self._get_data_associated_with_station(
                 station_nbr=attr["station_nbr"],
                 start_date=attr["period_of_record_start_date"],
                 end_date=attr["period_of_record_end_date"],
@@ -126,9 +126,9 @@ class OregonStaRequestBuilder():
                 "description": property,
                 "observationType": "http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement",
                 "unitOfMeasurement": {
-                    "name": "Unknown",
-                    "symbol": "Unknown",
-                    "definition": "Unknown",
+                    "name": units,
+                    "symbol": units,
+                    "definition": units,
                 },
                 "ObservedProperty": {
                     "name": property,
@@ -136,7 +136,7 @@ class OregonStaRequestBuilder():
                     "definition": "Unknown",
                 },
                 "Sensor": {
-                    "name": "Unkown",
+                    "name": "Unknown",
                     "description": "Unknown",
                     "encodingType": "Unknown",
                     "metadata": "Unknown",
