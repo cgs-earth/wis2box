@@ -134,6 +134,10 @@ def to_oregon_datetime(date_str: datetime.datetime) -> str:
     """Convert a datetime into the format that the Oregon API expects"""
     return datetime.datetime.strftime(date_str, "%m/%d/%Y %I:%M:%S %p")
 
+def from_oregon_datetime(date_str: str) -> datetime.datetime:
+    """Convert a datetime string into a datetime object"""
+    return datetime.datetime.strptime(date_str, "%m/%d/%Y %I:%M:%S %p")
+
 class UpdateMetadata(TypedDict):
     data_start: str
     data_end: str

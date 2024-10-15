@@ -9,3 +9,5 @@ services:
 #  wis2box-api:
 #    volumes:
 #      - ../../wis2box-api/wis2box_api:/usr/local/lib/python3.8/dist-packages/wis2box_api-0.3.dev0-py3.8.egg/wis2box_api
+
+# cd /usr/local/lib/python3.9/site-packages/wis2box-0.6.dev1-py3.9.egg/wis2box/oregon/tests to get to the test dir

@@ -6,3 +6,4 @@ paho-mqtt<2
 pygeometa
 PyYAML
 requests
+pytest

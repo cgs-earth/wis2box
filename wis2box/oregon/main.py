@@ -21,13 +21,14 @@
 
 from datetime import datetime
 import json
+import os
 import requests
 from typing import Tuple, Optional, List
 import click
 import logging
 from wis2box import cli_helpers
 from wis2box.api import remove_collection, setup_collection, upsert_collection_item
-
+import pytest
 from wis2box.env import API_BACKEND_URL, STORAGE_INCOMING
 from wis2box.oregon.lib import DataUpdateHelper, OregonHttpClient, assert_valid_date, download_oregon_tsv, generate_phenomenon_time, parse_oregon_tsv, to_oregon_datetime
 from wis2box.oregon.types import ALL_RELEVANT_STATIONS, POTENTIAL_DATASTREAMS, Attributes, OregonHttpResponse, StationData, Datastream
@@ -312,8 +313,18 @@ def oregon():
     """Station metadata management for Oregon Water Resources"""
     pass
 
+@click.command()
+@click.pass_context
+@cli_helpers.OPTION_VERBOSITY
+def test(ctx, verbosity):
+    """Run all pytest tests in the wis2box.oregon package"""
+    # get the directory of this file
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    test_dir = os.path.join(dir_path, "tests")
+    pytest.main([test_dir])
+
 oregon.add_command(publish)
 oregon.add_command(load)
 oregon.add_command(delete)
 oregon.add_command(update)
-
+oregon.add_command(test)
