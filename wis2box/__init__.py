@@ -29,7 +29,7 @@ from wis2box.env import environment
 from wis2box.metadata import metadata
 from wis2box.pubsub import pubsub
 from wis2box.auth import auth
-from wis2box.oregon.main import oregon
+from wis2box.oregon.cli import oregon
 
 
 @click.group()

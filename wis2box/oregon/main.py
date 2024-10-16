@@ -21,105 +21,107 @@
 
 from datetime import datetime
 import json
-import os
 import requests
 from typing import Tuple, Optional, List
-import click
 import logging
-from wis2box import cli_helpers
 from wis2box.api import remove_collection, setup_collection, upsert_collection_item
-import pytest
-from wis2box.env import API_BACKEND_URL, STORAGE_INCOMING
-from wis2box.oregon.lib import DataUpdateHelper, OregonHttpClient, assert_valid_date, download_oregon_tsv, generate_phenomenon_time, parse_oregon_tsv, to_oregon_datetime
-from wis2box.oregon.types import ALL_RELEVANT_STATIONS, POTENTIAL_DATASTREAMS, Attributes, OregonHttpResponse, StationData, Datastream
-from wis2box.storage import put_data
+from wis2box.env import API_BACKEND_URL
+from wis2box.oregon.lib import (
+    DataUpdateHelper,
+    OregonHttpClient,
+    assert_valid_date,
+    download_oregon_tsv,
+    generate_phenomenon_time,
+    parse_oregon_tsv,
+    to_oregon_datetime,
+    to_sensorthings_observation,
+    to_station_metadata,
+)
+from wis2box.oregon.types import (
+    ALL_RELEVANT_STATIONS,
+    POTENTIAL_DATASTREAMS,
+    START_OF_DATA,
+    OregonHttpResponse,
+    ParsedTSVData,
+    StationData,
+    Datastream,
+)
 
 LOGGER = logging.getLogger(__name__)
 
 THINGS_COLLECTION = "Things"
 
 
-class OregonStaRequestBuilder():
+class OregonStaRequestBuilder:
     """
-    Helper class for constructing the sensorthings API requests for 
+    Helper class for constructing the sensorthings API requests for
     inserting oregon data into the sensorthings FROST server
     """
 
     relevant_stations: List[int]
-    data_start: Optional[str]
-    data_end: Optional[str]
+    data_start: str
+    data_end: str
 
-    def __init__(self, relevant_stations: List[int], data_start: Optional[str], data_end: Optional[str]) -> None:
+    def __init__(
+        self, relevant_stations: List[int], data_start: str, data_end: str
+    ) -> None:
         self.relevant_stations = relevant_stations
         self.data_start = data_start
         self.data_end = data_end
 
     def _get_upstream_data(self) -> list[StationData]:
-        """Get metadata for all relevant stations."""
+        """Get the upstream metadata from the Oregon API for all relevant stations."""
         client = OregonHttpClient()
+
         # Split the ALL_RELEVANT_STATIONS into two halves since the oregon api can't handle all of them at once
-        half_index = len(self.relevant_stations) // 2
-        first_half_stations = self.relevant_stations[:half_index]
-        second_half_stations = self.relevant_stations[half_index:]
+        if len(self.relevant_stations) > 1:
+            half_index = len(self.relevant_stations) // 2
+            first_half_stations = self.relevant_stations[:half_index]
+            second_half_stations = self.relevant_stations[half_index:]
 
-        # Fetch and process the first half of the stations
-        first_station_set: OregonHttpResponse = client.fetch_stations(first_half_stations)
-        second_station_set: OregonHttpResponse = client.fetch_stations(second_half_stations)
-        # create one larger dictionary that merges the two
-        all_stations = first_station_set["features"] + second_station_set["features"]
-        return all_stations
+            # Fetch and process the first half of the stations
+            first_station_set: OregonHttpResponse = client.fetch_stations(
+                first_half_stations
+            )
+            second_station_set: OregonHttpResponse = client.fetch_stations(
+                second_half_stations
+            )
+            # create one larger dictionary that merges the two
+            return first_station_set["features"] + second_station_set["features"]
 
-    def _get_data_associated_with_station(
-        self, station_nbr, start_date, end_date, dataset
-    ) -> Tuple[list[float], str, list[str]]:
-        """Ingest all data from a station and return the third column."""
-        start_date = "09/25/2024 12:00:00" # TODO: remove this in prod; here just to prevent overfetching in dev
-        end_date = "09/30/2024 12:00:00"
-        response: bytes = download_oregon_tsv(dataset, station_nbr, start_date, end_date)
-        put_data(response, f"{STORAGE_INCOMING}/oregon/{station_nbr}_{dataset}_{start_date}_{end_date}.tsv")
-        sensor_values, units, dates = parse_oregon_tsv(response)
-        return (sensor_values, units, dates)
+        # If there's only one station, just fetch it directly since we can't split it
+        else:
+            return client.fetch_stations(self.relevant_stations)["features"]
 
     def _generate_datastreams_and_observations(
-        self, attr: Attributes,
+        self,
+        station: StationData,
     ) -> Tuple[list[Datastream], list[dict]]:
+        """Given a station, return the datastreams and observations associated with it."""
+        attr = station["attributes"]
         datastreams = []
         observations: list[dict] = []
         id = 0
+
         for stream in POTENTIAL_DATASTREAMS:
-            if stream not in attr or str(attr[stream]) != "1":
+            no_stream_available = str(attr[stream]) != "1" or stream not in attr
+            if no_stream_available:
                 continue
 
-            datapoints, units, observation_times = self._get_data_associated_with_station(
-                station_nbr=attr["station_nbr"],
-                start_date=attr["period_of_record_start_date"],
-                end_date=attr["period_of_record_end_date"],
-                dataset=stream,
+            response: bytes = download_oregon_tsv(
+                stream, int(attr["station_nbr"]), self.data_start, self.data_end
             )
+            # put_data(response, f"{STORAGE_INCOMING}/oregon/{station_nbr}_{dataset}_{start_date}_{end_date}.tsv")
+            tsvParse: ParsedTSVData = parse_oregon_tsv(response)
 
-            for datapoint, obs_time in zip(datapoints, observation_times):
-                sta_formatted_data = {
-                    "resultTime": obs_time,
-                    "Datastream": {"@iot.id": f"{attr['station_nbr']}{id}"},
-                    "result": datapoint,
-                    "FeatureOfInterest": {
-                        "name": attr["station_name"],
-                        "description": attr["station_name"],
-                        "encodingType": "application/vnd.geo+json",
-                        "feature": {
-                            "type": "Point",
-                            "coordinates": [
-                                attr["longitude_dec"],
-                                attr["latitude_dec"],
-                                attr["elevation"],
-                            ],
-                        },
-                    },
-                }
+            for datapoint, obs_time in zip(tsvParse.data, tsvParse.dates):
+                sta_formatted_data = to_sensorthings_observation(
+                    attr, datapoint, obs_time, id
+                )
                 observations.append(sta_formatted_data)
 
-
-            time = generate_phenomenon_time(attr)
+            units = tsvParse.units
+            phenom_time = generate_phenomenon_time(attr)
             property = stream.removesuffix("_available").removesuffix("_avail")
             datastream = {
                 "@iot.id": f"{attr['station_nbr']}{id}",
@@ -136,102 +138,67 @@ class OregonStaRequestBuilder():
                     "description": property,
                     "definition": "Unknown",
                 },
-                "Sensor": {
-                    "name": "Unknown",
-                    "description": "Unknown",
-                    "encodingType": "Unknown",
-                    "metadata": "Unknown",
-                },
             }
-            if time:
-                datastream["phenomenonTime"] = time
 
             datastreams.append(datastream)
             id += 1
 
         return datastreams, observations
 
+    def _insert_to_FROST(
+        self,
+        station: StationData,
+        sta_datastreams: list[Datastream],
+        sta_observations: list[dict],
+    ) -> None:
+        """insert a station with its associated datastreams and observations to FROST"""
 
-    def send(self) -> None:
-        response = self._get_upstream_data()
-        self._insert_to_FROST(response)
+        station_data = to_station_metadata(station["attributes"], sta_datastreams)
+        upsert_collection_item(THINGS_COLLECTION, station_data)
 
-    def _generate_station_data(self, attr: Attributes, datastreams: list[Datastream]) -> dict:
-        """Generate data for the body of a POST request for Locations/ in FROST"""
-        return  {
-                "name": attr["station_name"],
-                "@iot.id": f"{attr['station_nbr']}",
-                "description": attr["station_name"],
-                "Locations": [
-                    {
-                        "name": attr["station_name"],
-                        "description": attr["station_name"],
-                        "encodingType": "application/vnd.geo+json",
-                        "location": {
-                            "type": "Point",
-                            "coordinates": [
-                                attr["longitude_dec"],
-                                attr["latitude_dec"],
-                                attr["elevation"],
-                            ],
-                        },
-                    }
-                ],
-                "Datastreams": datastreams,
-                "properties": {
-                    **attr,
-                },
-            }
+        if not sta_datastreams and not sta_observations:
+            return
 
-    def _insert_to_FROST(self, all_stations: list[StationData]) -> None:
+        batch_request = {"requests": []}
 
-        for station in all_stations:
-            attr = station["attributes"]
-
-            sta_datastreams, sta_observations = self._generate_datastreams_and_observations(attr)
-
-            station_data = self._generate_station_data(attr, sta_datastreams)
-            upsert_collection_item(THINGS_COLLECTION, station_data)
-
-            if not sta_datastreams and not sta_observations:
-                continue
-
-            batch_request = {"requests": []}
-
-            for obs in sta_observations:
-                batch_request["requests"].append({
+        for obs in sta_observations:
+            batch_request["requests"].append(
+                {
                     "id": obs["Datastream"]["@iot.id"],
                     "method": "post",
                     "url": "Observations",
-                    "body": obs
-                })
-
-            r = requests.post(
-                f"{API_BACKEND_URL}/$batch",
-                data=json.dumps(batch_request),
-                headers={"Content-Type": "application/json"},
+                    "body": obs,
+                }
             )
 
-            if r.status_code != 201:
-                LOGGER.error(f"Failed to create observation: {r.content}")
+        r = requests.post(
+            f"{API_BACKEND_URL}/$batch",
+            data=json.dumps(batch_request),
+            headers={"Content-Type": "application/json"},
+        )
+
+        if r.status_code != 201:
+            LOGGER.error(f"Failed to create observation: {r.content}")
+
+    def send(self) -> None:
+        """Get upstream data, run the ETL, and insert the sensorthings representation into FROST"""
+        response: list[StationData] = self._get_upstream_data()
+        for station in response:
+            sta_datastreams, sta_observations = (
+                self._generate_datastreams_and_observations(station)
+            )
+            LOGGER.debug(f"Insertion station {station} into FROST")
+            self._insert_to_FROST(station, sta_datastreams, sta_observations)
 
 
-# In the load_stations function
-@click.command()
-@click.pass_context
-@click.option("--station", "-s", default="*", help="station identifier")
-@click.option("--begin", "-b", help="data start date")
-@click.option("--end", "-e", help="data end date")
-@cli_helpers.OPTION_VERBOSITY
-def load(ctx, verbosity, station, begin, end):
-    """Loads stations into sensorthings backend"""
+def load_data_into_frost(station: int, begin: Optional[str], end: Optional[str]):
     remove_collection(THINGS_COLLECTION)
 
     METADATA = {
         "id": THINGS_COLLECTION,
         "title": THINGS_COLLECTION,
         "description": "Oregon Water Resource SensorThings",
-        "keywords": ["thing", "oregons"],
+        "keywords": ["thing", "oregon"],
         "links": [
             "https://gis.wrd.state.or.us/server/rest/services",
             "https://gis.wrd.state.or.us/server/sdk/rest/index.html#/02ss00000029000000",
@@ -242,89 +209,41 @@ def load(ctx, verbosity, station, begin, end):
     }
     setup_collection(meta=METADATA)
 
-    data_range_setter = DataUpdateHelper() 
+    data_range_setter = DataUpdateHelper()
+
+    if not begin:
+        begin = START_OF_DATA
+    if not end:
+        end = to_oregon_datetime(datetime.now())
+
     data_range_setter.update_range(begin, end)
 
-    builder = OregonStaRequestBuilder(relevant_stations=ALL_RELEVANT_STATIONS, data_start=begin, data_end=end)
+    if station == "*":
+        relevant_stations: list[int] = ALL_RELEVANT_STATIONS
+    else:
+        relevant_stations: list[int] = [int(station)]
+
+    builder = OregonStaRequestBuilder(
+        relevant_stations=relevant_stations, data_start=begin, data_end=end
+    )
     builder.send()
 
 
-@click.command()
-@click.pass_context
-@cli_helpers.OPTION_VERBOSITY
-def update(ctx, verbosity):
-    """Update the data to include new data since the last crawl"""
+def update_data(stations: list[int], new_end: Optional[str]):
     update_helper = DataUpdateHelper()
     _, end = update_helper.get_range()
     # make sure the start and end are valid dates
     assert_valid_date(end)
-    new_start = end # new start should be set to the previous end in order to only get new data
-   
-    # Get the current date and time
-    new_end = to_oregon_datetime(datetime.now())
-    builder = OregonStaRequestBuilder(relevant_stations=ALL_RELEVANT_STATIONS, data_start=new_start, data_end=new_end)
+    new_start = (
+        end  # new start should be set to the previous end in order to only get new data
+    )
+
+    if not new_end:
+        # Get the current date and time
+        new_end = to_oregon_datetime(datetime.now())
+        assert_valid_date(new_end)
+
+    builder = OregonStaRequestBuilder(
+        relevant_stations=stations, data_start=new_start, data_end=new_end
+    )
     builder.send()
-    
-@click.command()
-@click.pass_context
-@cli_helpers.OPTION_VERBOSITY
-def delete(ctx, verbosity):
-    """Delete a collection of stations from the API config and backend"""
-    remove_collection(THINGS_COLLECTION)
-
-
-@click.command()
-@click.pass_context
-@cli_helpers.OPTION_VERBOSITY
-def publish(ctx, verbosity):
-    """Publishes the observations and datastreams to the API config and backend"""
-    obs_metadata = {
-        "id": "Observations",
-        "title": "Observations",
-        "description": "SensorThings API Observations",
-        "keywords": ["observation", "dam"],
-        "links": ["https://data.usbr.gov/rise-api"],
-        "bbox": [-180, -90, 180, 90],
-        "time_field": "resultTime",
-        "id_field": "@iot.id",
-    }
-    setup_collection(meta=obs_metadata)
-
-    datastream_metadata = {
-        "id": "Datastreams",
-        "title": "Datastreams",
-        "description": "SensorThings API Datastreams",
-        "keywords": ["datastream", "dam"],
-        "links": [
-            "https://gis.wrd.state.or.us/server/rest/services",
-            "https://gis.wrd.state.or.us/server/sdk/rest/index.html#/02ss00000029000000",
-        ],
-        "bbox": [-180, -90, 180, 90],
-        "id_field": "@iot.id",
-        "title_field": "name",
-    }
-
-    setup_collection(meta=datastream_metadata)
-
-    click.echo("Done")
-
-@click.group()
-def oregon():
-    """Station metadata management for Oregon Water Resources"""
-    pass
-
-@click.command()
-@click.pass_context
-@cli_helpers.OPTION_VERBOSITY
-def test(ctx, verbosity):
-    """Run all pytest tests in the wis2box.oregon package"""
-    # get the directory of this file
-    dir_path = os.path.dirname(os.path.realpath(__file__))
-    test_dir = os.path.join(dir_path, "tests")
-    pytest.main([test_dir])
-
-oregon.add_command(publish)
-oregon.add_command(load)
-oregon.add_command(delete)
-oregon.add_command(update)
-oregon.add_command(test)

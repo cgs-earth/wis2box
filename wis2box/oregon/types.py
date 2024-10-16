@@ -1,4 +1,5 @@
 from typing import List, Optional, TypedDict
+from dataclasses import dataclass
 
 POTENTIAL_DATASTREAMS: dict[str,str] = {
     "stage_instantaneous_available" : "Instantaneous_Stage",
@@ -9,14 +10,17 @@ POTENTIAL_DATASTREAMS: dict[str,str] = {
     "water_temp_mean_available": "WTEMP_MEAN",
     "water_temp_instantaneous_avail": "WTEMP15",
     "water_temp_measurement_avail": "WTEMP_MEASURE",
-    
-    # Unclear what these map to
-    "measured_flow_available": "UNKNOWN",
+    "measured_flow_available": "Measurements",
+
+    # This has the available suffix but is not a datastream
+    # "rating_curve_available": "N/A",
+
+    # These are potential datastreams in the ESRI API response
+    # However, they are never used in the stations we use; it is unclear their parameter name
     "volume_midnight_available": "UNKNOWN",
     "stage_midnight_available": "UNKNOWN",
     "mean_daily_volume_available": "UNKNOWN",
     "mean_daily_stage_available": "UNKNOWN",
-    "rating_curve_available": "UNKNOWN",
     "air_temp_instantaneous_avail": "UNKNOWN",
     "air_temp_mean_available": "UNKNOWN",
     "air_temp_max_available": "UNKNOWN",
@@ -195,8 +199,11 @@ class Attributes(TypedDict):
     source_type_name: str
     station_status_name: str
     current_operation_mode_name: str
-    period_of_record_start_date: int
-    period_of_record_end_date: int
+    
+    # period of record is as a unix time delta and thus is a int
+    period_of_record_start_date: Optional[int]
+    period_of_record_end_date: Optional[int] 
+
     nbr_of_complete_water_years: int
     nbr_of_peak_flow_values: int
     peak_flow_record_start_wy: int
@@ -277,3 +284,37 @@ class OregonHttpResponse(TypedDict):
     geometryType: str
     fields: list
     features: list[StationData]
+
+
+OBSERVATION_COLLECTION_METADATA = {
+        "id": "Observations",
+        "title": "Observations",
+        "description": "SensorThings API Observations",
+        "keywords": ["observation", "dam"],
+        "links": ["https://gis.wrd.state.or.us/server/rest/services"],
+        "bbox": [-180, -90, 180, 90],
+        "time_field": "resultTime",
+        "id_field": "@iot.id",
+    }
+
+DATASTREAM_COLLECTION_METADATA = {
+        "id": "Datastreams",
+        "title": "Datastreams",
+        "description": "SensorThings API Datastreams",
+        "keywords": ["datastream", "dam"],
+        "links": [
+            "https://gis.wrd.state.or.us/server/rest/services",
+            "https://gis.wrd.state.or.us/server/sdk/rest/index.html#/02ss00000029000000",
+        ],
+        "bbox": [-180, -90, 180, 90],
+        "id_field": "@iot.id",
+        "title_field": "name",
+    }
+
+@dataclass
+class ParsedTSVData():
+    data: List[Optional[float]]
+    units: str
+    dates: List[str]
+
+START_OF_DATA = "9/25/1850 12:00:00 AM" # random very old date. Need a very old value to get the start of the API

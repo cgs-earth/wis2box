@@ -9,48 +9,61 @@ from urllib.parse import urlencode
 from typing import ClassVar, List, Optional, Tuple, TypedDict
 
 from wis2box.oregon.cache import ShelveCache
-from wis2box.oregon.types import POTENTIAL_DATASTREAMS, Attributes, OregonHttpResponse
+from wis2box.oregon.types import (
+    POTENTIAL_DATASTREAMS,
+    Attributes,
+    OregonHttpResponse,
+    Datastream,
+    ParsedTSVData
+)
 
 LOGGER = logging.getLogger(__name__)
 
-def parse_oregon_tsv(response: bytes) -> Tuple[list[float], str, list[str]]:
+def parse_oregon_tsv(response: bytes) -> ParsedTSVData:
     """Return the data column and the date column for a given tsv response"""
     # we just use the third column since the name of the dataset in the
     # url does not match the name in the result column. However,
     # it consistently is returned in the third column
-    third_column_data = []
-    date_data: list[str] = []
+    data: list[Optional[float]] = []
+    dates: list[str] = []
     units = "Unknown"
     tsv_data = io.StringIO(response.decode("utf-8"))
     reader = csv.reader(tsv_data, delimiter="\t")
     # Skip the header row if it exists
     header = next(reader, None)
-        
+
     if header is not None:
+        if "Invalid data type to download" in header:
+            raise ValueError("The tsv response is invalid due to an incorrect requested data type")
         units = header[2].split("_")[-1]
         for row in reader:
             if len(row) >= 3:
                 if row[2] == "":
-                    third_column_data.append(None)
+                    data.append(None)
                 else:
-                    third_column_data.append(float(row[2]))
+                    data.append(float(row[2]))
 
-            date_data.append(parse_date(row[1]))
+            dates.append(parse_date(str(row[1])))
 
-    return (third_column_data, units, date_data)
+    return ParsedTSVData(data, units, dates)
+
+
+def unix_offset_to_iso(unix_offset: int) -> str:
+    """Convert unix offset to iso format"""
+    return datetime.datetime.fromtimestamp(unix_offset / 1000).isoformat()
+
 
 def generate_phenomenon_time(attributes: Attributes) -> Optional[str]:
     if attributes["period_of_record_start_date"] is not None:
-        start = datetime.datetime.fromtimestamp(
-            attributes["period_of_record_start_date"] / 1000
-        ).isoformat()
+        start = unix_offset_to_iso(
+            attributes["period_of_record_start_date"])
     else:
         start = ".."  # Default value if start date is None
 
     if attributes["period_of_record_end_date"] is not None:
-        end = datetime.datetime.fromtimestamp(
-            attributes["period_of_record_end_date"] / 1000
-        ).isoformat()
+        end = unix_offset_to_iso(
+            attributes["period_of_record_end_date"]
+        )
     else:
         end = ".."  # Default value if end date is None
 
@@ -68,7 +81,10 @@ def parse_date(date_str: str) -> str:
             continue
     raise ValueError(f"Date {date_str} does not match any known formats")
 
-def download_oregon_tsv(dataset: str, station_nbr: str, start_date: str, end_date: str) -> bytes:
+
+def download_oregon_tsv(
+    dataset: str, station_nbr: int, start_date: str, end_date: str
+) -> bytes:
     """Get the tsv data for a specific dataset for a specific station in a given date range"""
     dataset_param_name = POTENTIAL_DATASTREAMS[dataset]
     base_url = (
@@ -80,7 +96,7 @@ def download_oregon_tsv(dataset: str, station_nbr: str, start_date: str, end_dat
         "end_date": end_date,
         "dataset": dataset_param_name,
         "format": "tsv",
-        "units": "" # this is required
+        "units": "",  # This is provided but empty since the API requires it. However, we don't know the name ahead of time
     }
     encoded_params = urlencode(params)
     tsv_url = f"{base_url}?{encoded_params}"
@@ -89,9 +105,63 @@ def download_oregon_tsv(dataset: str, station_nbr: str, start_date: str, end_dat
     response, status_code = cache.get_or_fetch(tsv_url, force_fetch=False)
 
     if status_code != 200 or "An Error Has Occured" in response.decode("utf-8"):
-        raise RuntimeError(f"Request to {tsv_url} failed with status {status_code} with params {params}")
+        raise RuntimeError(
+            f"Request to {tsv_url} failed with status {status_code} with response '{response.decode()}"
+        )
 
     return response
+
+
+def to_sensorthings_observation(
+    attr: Attributes, datapoint: Optional[float], observation_time: str, id: int
+):
+    """Return the json body for a sensorthings observation insert to FROST"""
+    return {
+        "resultTime": observation_time,
+        "Datastream": {"@iot.id": f"{attr['station_nbr']}{id}"},
+        "result": datapoint,
+        "FeatureOfInterest": {
+            "name": attr["station_name"],
+            "description": attr["station_name"],
+            "encodingType": "application/vnd.geo+json",
+            "feature": {
+                "type": "Point",
+                "coordinates": [
+                    attr["longitude_dec"],
+                    attr["latitude_dec"],
+                    attr["elevation"],
+                ],
+            },
+        },
+    }
+
+
+def to_station_metadata(attr: Attributes, datastreams: list[Datastream]) -> dict:
+    """Generate data for the body of a POST request for Locations/ in FROST"""
+    return {
+        "name": attr["station_name"],
+        "@iot.id": f"{attr['station_nbr']}",
+        "description": attr["station_name"],
+        "Locations": [
+            {
+                "name": attr["station_name"],
+                "description": attr["station_name"],
+                "encodingType": "application/vnd.geo+json",
+                "location": {
+                    "type": "Point",
+                    "coordinates": [
+                        attr["longitude_dec"],
+                        attr["latitude_dec"],
+                        attr["elevation"],
+                    ],
+                },
+            }
+        ],
+        "Datastreams": datastreams,
+        "properties": {
+            **attr,
+        },
+    }
 
 
 class OregonHttpClient:
@@ -121,28 +191,32 @@ class OregonHttpClient:
         return query
 
 
-def assert_valid_date(date_str: Optional[str]) -> None:
+def assert_valid_date(date_str: str) -> None:
     """defensively assert that a date string is in the proper format for the Oregon API"""
-    if not date_str:
-        return
     try:
         datetime.datetime.strptime(date_str, "%m/%d/%Y %I:%M:%S %p")
     except ValueError:
-        raise ValueError(f"Date string '{date_str}' could not be parsed into the format that the Oregon API expects")
+        raise ValueError(
+            f"Date string '{date_str}' could not be parsed into the format that the Oregon API expects"
+        )
+
 
 def to_oregon_datetime(date_str: datetime.datetime) -> str:
     """Convert a datetime into the format that the Oregon API expects"""
     return datetime.datetime.strftime(date_str, "%m/%d/%Y %I:%M:%S %p")
 
+
 def from_oregon_datetime(date_str: str) -> datetime.datetime:
     """Convert a datetime string into a datetime object"""
     return datetime.datetime.strptime(date_str, "%m/%d/%Y %I:%M:%S %p")
+
 
 class UpdateMetadata(TypedDict):
     data_start: str
     data_end: str
 
-class DataUpdateHelper():
+
+class DataUpdateHelper:
     """Helper class to determine what to download based on a local metadata file"""
 
     metadata_file: ClassVar[str] = "oregon_metadata.json"
