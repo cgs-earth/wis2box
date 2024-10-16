@@ -7,3 +7,4 @@ pygeometa
 PyYAML
 requests
 pytest
+aiohttp

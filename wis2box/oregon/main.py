@@ -19,18 +19,24 @@
 #
 ###############################################################################
 
+import asyncio
 from datetime import datetime
+import io
 import json
-import requests
+import stat
+import sys
+import aiohttp
 from typing import Tuple, Optional, List
 import logging
+import requests
 from wis2box.api import remove_collection, setup_collection, upsert_collection_item
-from wis2box.env import API_BACKEND_URL
+from wis2box.env import API_BACKEND_URL, STORAGE_INCOMING
 from wis2box.oregon.lib import (
     DataUpdateHelper,
     OregonHttpClient,
     assert_valid_date,
     download_oregon_tsv,
+    generate_FROST_batch_data,
     generate_phenomenon_time,
     parse_oregon_tsv,
     to_oregon_datetime,
@@ -41,15 +47,16 @@ from wis2box.oregon.types import (
     ALL_RELEVANT_STATIONS,
     POTENTIAL_DATASTREAMS,
     START_OF_DATA,
+    THINGS_COLLECTION,
+    FrostBatchRequest,
     OregonHttpResponse,
     ParsedTSVData,
     StationData,
     Datastream,
 )
+from wis2box.storage import put_data
 
 LOGGER = logging.getLogger(__name__)
-
-THINGS_COLLECTION = "Things"
 
 
 class OregonStaRequestBuilder:
@@ -121,10 +128,10 @@ class OregonStaRequestBuilder:
                 observations.append(sta_formatted_data)
 
             units = tsvParse.units
-            phenom_time = generate_phenomenon_time(attr)
+            phenom_time = generate_phenomenon_time(tsvParse.dates)
             property = stream.removesuffix("_available").removesuffix("_avail")
             datastream = {
-                "@iot.id": f"{attr['station_nbr']}{id}",
+                "@iot.id": int(f"{attr['station_nbr']}{id}"),
                 "name": property,
                 "description": property,
                 "observationType": "http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement",
@@ -138,6 +145,17 @@ class OregonStaRequestBuilder:
                     "description": property,
                     "definition": "Unknown",
                 },
+                "Sensor": {
+                    "@iot.id": 0,
+                    "name": "Unknown",
+                    "description": "Unknown",
+                    "encodingType": "Unknown",
+                    "metadata": "Unknown",
+                },
+                # These are the same since we assume the sensor reports at the same time it is measured
+                # Even though those are the same value, FROST appears to round resultTime to the nearest hour but not phenomenonTime
+                "phenomenonTime": phenom_time,
+                "resultTime": phenom_time,
             }
 
             datastreams.append(datastream)
@@ -145,50 +163,28 @@ class OregonStaRequestBuilder:
 
         return datastreams, observations
 
-    def _insert_to_FROST(
-        self,
-        station: StationData,
-        sta_datastreams: list[Datastream],
-        sta_observations: list[dict],
-    ) -> None:
-        """insert a station with its associated datastreams and observations to FROST"""
-
-        station_data = to_station_metadata(station["attributes"], sta_datastreams)
-        upsert_collection_item(THINGS_COLLECTION, station_data)
-
-        if not sta_datastreams and not sta_observations:
-            return
-
-        batch_request = {"requests": []}
-
-        for obs in sta_observations:
-            batch_request["requests"].append(
-                {
-                    "id": obs["Datastream"]["@iot.id"],
-                    "method": "post",
-                    "url": "Observations",
-                    "body": obs,
-                }
+    def send(self) -> None:
+        batch_body: list[FrostBatchRequest] = []
+        for station in self._get_upstream_data():
+            datastreams, sta_observations = self._generate_datastreams_and_observations(
+                station
             )
+            batch_body.extend(generate_FROST_batch_data(sta_observations))
+            stations = to_station_metadata(station["attributes"], datastreams)
+            upsert_collection_item(THINGS_COLLECTION, stations)
 
+        bytes = json.dumps(batch_body).encode("utf-8")
+        put_data(bytes, f"{STORAGE_INCOMING}/frost_batch_request.json")
         r = requests.post(
             f"{API_BACKEND_URL}/$batch",
-            data=json.dumps(batch_request),
+            data=json.dumps({"requests": batch_body}),
             headers={"Content-Type": "application/json"},
         )
-
-        if r.status_code != 201:
-            LOGGER.error(f"Failed to create observation: {r.content}")
-
-    def send(self) -> None:
-        """Get upstream data, run the ETL, and insert the sensorthings representation into FROST"""
-        response: list[StationData] = self._get_upstream_data()
-        for station in response:
-            sta_datastreams, sta_observations = (
-                self._generate_datastreams_and_observations(station)
+        # Proper status code to check is 201 for POST but sometimes the server returns 200 to signify success
+        if r.status_code != 201 and r.status_code != 200:
+            raise RuntimeError(
+                f"Failed to insert observation into FROST. Got {r.status_code} with content: {r.content}"
             )
-            LOGGER.debug(f"Insertion station {station} into FROST")
-            self._insert_to_FROST(station, sta_datastreams, sta_observations)
 
 
 def load_data_into_frost(station: int, begin: Optional[str], end: Optional[str]):
@@ -230,6 +226,7 @@ def load_data_into_frost(station: int, begin: Optional[str], end: Optional[str])
 
 
 def update_data(stations: list[int], new_end: Optional[str]):
+    """Update the data in FROST"""
     update_helper = DataUpdateHelper()
     _, end = update_helper.get_range()
     # make sure the start and end are valid dates
@@ -246,4 +243,7 @@ def update_data(stations: list[int], new_end: Optional[str]):
     builder = OregonStaRequestBuilder(
         relevant_stations=stations, data_start=new_start, data_end=new_end
     )
+    LOGGER.error(f"Updating data from {new_start} to {new_end}")
     builder.send()
+
+    update_helper.update_range(new_start, new_end)

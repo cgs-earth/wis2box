@@ -43,3 +43,5 @@ dev.env
 docker/.env
 
 .ipynb_checkpoints
+.venv/
+frost_batch_request*.json

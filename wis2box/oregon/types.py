@@ -1,5 +1,8 @@
-from typing import List, Optional, TypedDict
+from ctypes import Union
+from typing import List, Literal, Optional, TypedDict
 from dataclasses import dataclass
+
+THINGS_COLLECTION = "Things"
 
 POTENTIAL_DATASTREAMS: dict[str,str] = {
     "stage_instantaneous_available" : "Instantaneous_Stage",
@@ -318,3 +321,10 @@ class ParsedTSVData():
     dates: List[str]
 
 START_OF_DATA = "9/25/1850 12:00:00 AM" # random very old date. Need a very old value to get the start of the API
+
+
+class FrostBatchRequest():
+    id: str
+    method: Literal["post"]
+    url: Literal["Observations"]
+    body: dict 

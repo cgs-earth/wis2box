@@ -3,8 +3,9 @@ import click
 from typing import Optional
 from wis2box import cli_helpers
 from wis2box.api import remove_collection, setup_collection
-from wis2box.oregon.main import THINGS_COLLECTION, load_data_into_frost, update_data
+from wis2box.oregon.main import load_data_into_frost, update_data
 from wis2box.oregon.types import ALL_RELEVANT_STATIONS, DATASTREAM_COLLECTION_METADATA, OBSERVATION_COLLECTION_METADATA
+from wis2box.oregon.types import THINGS_COLLECTION
 import pytest
 
 @click.command()
@@ -54,7 +55,7 @@ def test(ctx, verbosity, pytest_args):
     """Run all pytest tests in the oregon tests/ folder. Pass in additional arguments to pytest if needed."""
     dir_path = os.path.dirname(os.path.realpath(__file__))
     test_dir = os.path.join(dir_path, "tests")
-    pytest.main([test_dir, *pytest_args])
+    pytest.main([test_dir, "-vvvx", *pytest_args])
 
 
 @click.group()
