@@ -220,7 +220,7 @@ def generate_FROST_batch_data(
     for id, obs in enumerate(sta_observations):
         body_data.append(
             {
-                "id": int(f"{obs['Datastream']['@iot.id']}{id}"),
+                "id":f"{obs['Datastream']['@iot.id']}{id}",
                 "method": "post",
                 "url": "Observations",
                 "body": obs,

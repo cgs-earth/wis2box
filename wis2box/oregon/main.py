@@ -132,7 +132,7 @@ class OregonStaRequestBuilder:
             property = stream.removesuffix("_available").removesuffix("_avail")
             datastream = {
                 "@iot.id": int(f"{attr['station_nbr']}{id}"),
-                "name": property,
+                "name": f"{attr['station_name']} {property}",
                 "description": property,
                 "observationType": "http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement",
                 "unitOfMeasurement": {
