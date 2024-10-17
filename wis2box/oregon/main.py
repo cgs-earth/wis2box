@@ -21,10 +21,7 @@
 
 import asyncio
 from datetime import datetime
-import io
 import json
-import stat
-import sys
 import aiohttp
 from typing import Tuple, Optional, List
 import logging
@@ -35,14 +32,19 @@ from wis2box.oregon.lib import (
     DataUpdateHelper,
     OregonHttpClient,
     assert_valid_date,
-    download_oregon_tsv,
     generate_FROST_batch_data,
+    generate_oregon_tsv_url,
     generate_phenomenon_time,
     parse_oregon_tsv,
     to_oregon_datetime,
-    to_sensorthings_observation,
-    to_station_metadata,
 )
+
+from wis2box.oregon.sta_generation import (
+    to_sensorthings_datastream,
+    to_sensorthings_observation,
+    to_sensorthings_station
+)
+
 from wis2box.oregon.types import (
     ALL_RELEVANT_STATIONS,
     POTENTIAL_DATASTREAMS,
@@ -106,71 +108,52 @@ class OregonStaRequestBuilder:
     ) -> Tuple[list[Datastream], list[dict]]:
         """Given a station, return the datastreams and observations associated with it."""
         attr = station["attributes"]
-        datastreams = []
+        datastreams: list[Datastream] = []
         observations: list[dict] = []
-        id = 0
 
-        for stream in POTENTIAL_DATASTREAMS:
+        async def __fetch_datastream(stream: str, id: int):
+            async with aiohttp.ClientSession() as session:
+                LOGGER.debug(f"Fetching {stream} data for station {attr['station_nbr']}")
+                tsv_url = generate_oregon_tsv_url(stream, int(attr["station_nbr"]), self.data_start, self.data_end)
+                
+                response = await session.get(tsv_url)
+                tsvParse: ParsedTSVData = parse_oregon_tsv(await response.read())
+
+                for datapoint, obs_time in zip(tsvParse.data, tsvParse.dates):
+                    sta_formatted_data = to_sensorthings_observation(
+                        attr, datapoint, obs_time, id
+                    )
+                    observations.append(sta_formatted_data)
+
+                phenom_time = generate_phenomenon_time(tsvParse.dates)
+                datastream = to_sensorthings_datastream(attr, tsvParse.units, phenom_time, stream, id)
+                datastreams.append(datastream)
+            
+        tasks = []
+
+        for id, stream in enumerate(POTENTIAL_DATASTREAMS):
             no_stream_available = str(attr[stream]) != "1" or stream not in attr
             if no_stream_available:
                 continue
+            tasks.append(__fetch_datastream(stream, id))
 
-            response: bytes = download_oregon_tsv(
-                stream, int(attr["station_nbr"]), self.data_start, self.data_end
-            )
-            # put_data(response, f"{STORAGE_INCOMING}/oregon/{station_nbr}_{dataset}_{start_date}_{end_date}.tsv")
-            tsvParse: ParsedTSVData = parse_oregon_tsv(response)
+        async def main():
+            return await asyncio.gather(*tasks)
 
-            for datapoint, obs_time in zip(tsvParse.data, tsvParse.dates):
-                sta_formatted_data = to_sensorthings_observation(
-                    attr, datapoint, obs_time, id
-                )
-                observations.append(sta_formatted_data)
+        datastreams = asyncio.run(main())
 
-            units = tsvParse.units
-            phenom_time = generate_phenomenon_time(tsvParse.dates)
-            property = stream.removesuffix("_available").removesuffix("_avail")
-            datastream = {
-                "@iot.id": int(f"{attr['station_nbr']}{id}"),
-                "name": f"{attr['station_name']} {property}",
-                "description": property,
-                "observationType": "http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement",
-                "unitOfMeasurement": {
-                    "name": units,
-                    "symbol": units,
-                    "definition": units,
-                },
-                "ObservedProperty": {
-                    "name": property,
-                    "description": property,
-                    "definition": "Unknown",
-                },
-                "Sensor": {
-                    "@iot.id": 0,
-                    "name": "Unknown",
-                    "description": "Unknown",
-                    "encodingType": "Unknown",
-                    "metadata": "Unknown",
-                },
-                # These are the same since we assume the sensor reports at the same time it is measured
-                # Even though those are the same value, FROST appears to round resultTime to the nearest hour but not phenomenonTime
-                "phenomenonTime": phenom_time,
-                "resultTime": phenom_time,
-            }
-
-            datastreams.append(datastream)
-            id += 1
-
+        LOGGER.info(f"Finished downloading {len(datastreams)} datastreams and {len(observations)} observations")
         return datastreams, observations
 
     def send(self) -> None:
         batch_body: list[FrostBatchRequest] = []
         for station in self._get_upstream_data():
+            LOGGER.info(f"Generating data for station {station['attributes']['station_nbr']}")
             datastreams, sta_observations = self._generate_datastreams_and_observations(
                 station
             )
             batch_body.extend(generate_FROST_batch_data(sta_observations))
-            stations = to_station_metadata(station["attributes"], datastreams)
+            stations = to_sensorthings_station(station["attributes"], datastreams)
             upsert_collection_item(THINGS_COLLECTION, stations)
 
         bytes = json.dumps(batch_body).encode("utf-8")

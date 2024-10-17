@@ -1,4 +1,3 @@
-from ctypes import Union
 from typing import List, Literal, Optional, TypedDict
 from dataclasses import dataclass
 
@@ -272,14 +271,15 @@ Datastream = TypedDict(
     "Datastream",
     {
         # "@iot.selfLink": str,
-        "@iot.id": str,
+        "@iot.id": int,
         "name": str,
         "description": str,
         "observationType": str,
         "unitOfMeasurement": UnitOfMeasurement,
         "ObservedProperty": dict[str, str],
-        "phenomenonTime": Optional[str],
-        "Sensor": dict[str, str],
+        # "phenomenonTime": NotRequired[str],
+        # "resultTime": NotRequired[str], # not present in python 3.9 
+        "Sensor": dict,
     },
 )
 

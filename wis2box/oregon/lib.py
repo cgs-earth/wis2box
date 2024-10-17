@@ -1,19 +1,17 @@
 import csv
 import datetime
-import enum
 import io
 import json
 import logging
 import os
+import aiohttp
 from requests import Session
 from urllib.parse import urlencode
 from typing import ClassVar, List, Optional, Tuple, TypedDict
 
-from wis2box.api import upsert_collection_item
 from wis2box.oregon.cache import ShelveCache
 from wis2box.oregon.types import (
     POTENTIAL_DATASTREAMS,
-    THINGS_COLLECTION,
     Attributes,
     FrostBatchRequest,
     OregonHttpResponse,
@@ -22,6 +20,7 @@ from wis2box.oregon.types import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
 
 def parse_oregon_tsv(response: bytes) -> ParsedTSVData:
     """Return the data column and the date column for a given tsv response"""
@@ -38,7 +37,9 @@ def parse_oregon_tsv(response: bytes) -> ParsedTSVData:
 
     if header is not None:
         if "Invalid data type to download" in header:
-            raise ValueError("The tsv response is invalid due to an incorrect requested data type")
+            raise ValueError(
+                "The tsv response is invalid due to an incorrect requested data type"
+            )
         units = header[2].split("_")[-1]
         for row in reader:
             if len(row) >= 3:
@@ -56,18 +57,23 @@ def unix_offset_to_iso(unix_offset: int) -> str:
     """Convert unix offset to iso format"""
     return datetime.datetime.fromtimestamp(unix_offset / 1000).isoformat()
 
+
 def tsv_date_response_to_datetime(date_str: str) -> datetime.datetime:
     """Convert the date string from the tsv response to a datetime object"""
     date_str = date_str.replace("Z", "+00:00")
     return datetime.datetime.fromisoformat(date_str)
 
+
 def generate_phenomenon_time(dates: list[str]) -> Optional[str]:
     if len(dates) == 0:
         return None
     # generate the phenomenon time from the dates
-    datetimes: list[datetime.datetime] = [tsv_date_response_to_datetime(date) for date in dates]
+    datetimes: list[datetime.datetime] = [
+        tsv_date_response_to_datetime(date) for date in dates
+    ]
     earliest, oldest = min(datetimes), max(datetimes)
     return f"{earliest.isoformat()}/{oldest.isoformat()}"
+
 
 def parse_date(date_str: str) -> str:
     formats = ["%m-%d-%Y %H:%M", "%m-%d-%Y"]
@@ -78,11 +84,10 @@ def parse_date(date_str: str) -> str:
             continue
     raise ValueError(f"Date {date_str} does not match any known formats")
 
-
-def download_oregon_tsv(
+def generate_oregon_tsv_url(
     dataset: str, station_nbr: int, start_date: str, end_date: str
-) -> bytes:
-    """Get the tsv data for a specific dataset for a specific station in a given date range"""
+) -> str:
+    """Generate the oregon url for a specific dataset for a specific station in a given date range"""
     dataset_param_name = POTENTIAL_DATASTREAMS[dataset]
     base_url = (
         "https://apps.wrd.state.or.us/apps/sw/hydro_near_real_time/hydro_download.aspx"
@@ -96,7 +101,15 @@ def download_oregon_tsv(
         "units": "",  # This is provided but empty since the API requires it. However, we don't know the name ahead of time
     }
     encoded_params = urlencode(params)
-    tsv_url = f"{base_url}?{encoded_params}"
+    oregon_url = f"{base_url}?{encoded_params}"
+    return oregon_url
+
+
+def download_oregon_tsv(
+    dataset: str, station_nbr: int, start_date: str, end_date: str
+) -> bytes:
+    """Get the tsv data for a specific dataset for a specific station in a given date range"""
+    tsv_url = generate_oregon_tsv_url(dataset, station_nbr, start_date, end_date)
 
     cache = ShelveCache()
     response, status_code = cache.get_or_fetch(tsv_url, force_fetch=False)
@@ -107,58 +120,6 @@ def download_oregon_tsv(
         )
 
     return response
-
-
-def to_sensorthings_observation(
-    attr: Attributes, datapoint: Optional[float], observation_time: str, id: int
-):
-    """Return the json body for a sensorthings observation insert to FROST"""
-    return {
-        "resultTime": observation_time,
-        "Datastream": {"@iot.id": int(f"{attr['station_nbr']}{id}")},
-        "result": datapoint,
-        "FeatureOfInterest": {
-            "name": attr["station_name"],
-            "description": attr["station_name"],
-            "encodingType": "application/vnd.geo+json",
-            "feature": {
-                "type": "Point",
-                "coordinates": [
-                    attr["longitude_dec"],
-                    attr["latitude_dec"],
-                    attr["elevation"],
-                ],
-            },
-        },
-    }
-
-
-def to_station_metadata(attr: Attributes, datastreams: list[Datastream]) -> dict:
-    """Generate data for the body of a POST request for Locations/ in FROST"""
-    return {
-        "name": attr["station_name"],
-        "@iot.id": int(f"{attr['station_nbr']}"),
-        "description": attr["station_name"],
-        "Locations": [
-            {
-                "name": attr["station_name"],
-                "description": attr["station_name"],
-                "encodingType": "application/vnd.geo+json",
-                "location": {
-                    "type": "Point",
-                    "coordinates": [
-                        attr["longitude_dec"],
-                        attr["latitude_dec"],
-                        attr["elevation"],
-                    ],
-                },
-            }
-        ],
-        "Datastreams": datastreams,
-        "properties": {
-            **attr,
-        },
-    }
 
 
 class OregonHttpClient:
@@ -195,7 +156,7 @@ class OregonHttpClient:
 
 def assert_valid_date(date_str: str) -> None:
     """defensively assert that a date string is in the proper format for the Oregon API"""
-    try: 
+    try:
         datetime.datetime.strptime(date_str, "%m/%d/%Y %I:%M:%S %p")
     except ValueError:
         raise ValueError(
@@ -212,22 +173,22 @@ def from_oregon_datetime(date_str: str) -> datetime.datetime:
     """Convert a datetime string into a datetime object"""
     return datetime.datetime.strptime(date_str, "%m/%d/%Y %I:%M:%S %p")
 
+
 def generate_FROST_batch_data(
-        sta_observations: list[dict],
+    sta_observations: list[dict],
 ) -> list[FrostBatchRequest]:
     body_data = []
 
     for id, obs in enumerate(sta_observations):
         body_data.append(
             {
-                "id":f"{obs['Datastream']['@iot.id']}{id}",
+                "id": f"{obs['Datastream']['@iot.id']}{id}",
                 "method": "post",
                 "url": "Observations",
                 "body": obs,
             }
         )
     return body_data
-
 
 
 class UpdateMetadata(TypedDict):
