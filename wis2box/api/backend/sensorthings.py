@@ -46,7 +46,7 @@ class SensorthingsBackend(BaseBackend):
         self.url = url_join(defs.get('url'))
         self.http = Session()
 
-    def sta_id(self, collection_id: str) -> Tuple[str]:
+    def sta_id(self, collection_id: str) -> str:
         """
         Make collection_id STA friendly
 
@@ -65,7 +65,7 @@ class SensorthingsBackend(BaseBackend):
 
         :returns: `bool` of result
         """
-        return collection_id != ''
+        raise NotImplementedError
 
     def delete_collection(self, collection_id: str) -> bool:
         """
@@ -75,7 +75,15 @@ class SensorthingsBackend(BaseBackend):
 
         :returns: `bool` of delete result
         """
-        return collection_id != ''
+        sta_index = self.sta_id(collection_id) 
+        response = self.http.get(sta_index).json()
+        for item in response["value"]:
+            del_result = self.http.delete(f'{sta_index}({item["@iot.id"]})')
+            if del_result.status_code != 200:
+                LOGGER.error(f"Failed to delete {item['@iot.id']}: {del_result.content}")
+                return False
+        return True
+
 
     def has_collection(self, collection_id: str) -> bool:
         """
@@ -85,10 +93,11 @@ class SensorthingsBackend(BaseBackend):
 
         :returns: `bool` of collection result
         """
-        return collection_id != ''
+        # TODO this is not implemented but can't throw and error since we call it elsewhere
+        return True
 
     def upsert_collection_items(self, collection_id: str, items: list,
-                                method: str = 'POST') -> str:
+                                method: str = 'POST') -> bool:
         """
         Add or update collection items
 
@@ -104,8 +113,13 @@ class SensorthingsBackend(BaseBackend):
                 item_id = entity['@iot.id']
                 url = f'''{sta_index}('{item_id}')'''
                 r = self.http.patch(url, data=to_json(entity))
-            else:
+            elif method == 'DELETE':
+                item_id = entity['@iot.id']
+                r = self.http.delete(f'{sta_index}({item_id})')
+            elif method == 'POST':
                 r = self.http.post(sta_index, data=to_json(entity))
+            else: 
+                raise ValueError(f'Unsupported method: {method}')
 
             if not r.ok:
                 LOGGER.error(r.content)

@@ -1,4 +1,5 @@
 station_name,station_identifier,latitude,longitude,elevation
+station_name,wigos_station_identifier,traditional_station_identifier
 Lake Mead Hoover Dam and Powerplant,3514,36.0163,-114.7374,1229
 Lake Powell Glen Canyon Dam and Powerplant,393,37.05778,-111.30332,3596
 Lake Mohave Davis Dam and Powerplant,3513,35.1979,-114.5694,647

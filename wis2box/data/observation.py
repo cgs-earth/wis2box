@@ -32,8 +32,7 @@ from typing import Union
 from wis2box import cli_helpers
 from wis2box.api import setup_collection
 from wis2box.data.base import BaseAbstractData
-from wis2box.env import (DATADIR, DOCKER_API_URL, STORAGE_INCOMING,
-                         USBR_URL, RESULT_URL)
+from wis2box.env import (DATADIR, DOCKER_API_URL, STORAGE_INCOMING)
 from wis2box.storage import put_data
 from wis2box.topic_hierarchy import validate_and_load
 
