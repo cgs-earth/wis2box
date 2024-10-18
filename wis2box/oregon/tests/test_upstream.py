@@ -3,6 +3,8 @@ from wis2box.oregon.lib import download_oregon_tsv, parse_oregon_tsv, to_oregon_
 import pytest
 from collections import Counter
 
+from wis2box.oregon.types import START_OF_DATA
+
 @pytest.mark.parametrize("end_date", ["10/7/2022 12:00:00 AM", "10/7/2024 12:00:00 AM", "4/7/2000 11:00:00 AM"])
 def test_no_data_with_no_beginning_date(end_date):
     """It appears that if no beginning date is specified, the data will always be empty"""
@@ -85,3 +87,14 @@ def test_very_old_dates_are_the_same():
     assert very_old_result_1.dates == very_old_result_2.dates
     assert very_old_result_1.data == very_old_result_2.data
     assert very_old_result_1.units == very_old_result_2.units
+
+def test_how_many_observations_in_full_station():
+    begin = START_OF_DATA
+    end = to_oregon_datetime(datetime.now())
+
+    response: bytes = download_oregon_tsv(
+        "mean_daily_flow_available", 10371500, start_date=begin, end_date=end
+    )
+    result = parse_oregon_tsv(response)
+    length = len(result.dates)
+    assert length == 56540 == len(result.dates)

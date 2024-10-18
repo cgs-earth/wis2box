@@ -9,6 +9,7 @@ from requests import Session
 from urllib.parse import urlencode
 from typing import ClassVar, List, Optional, Tuple, TypedDict
 
+from wis2box.env import API_BACKEND_URL, STORAGE_INCOMING
 from wis2box.oregon.cache import ShelveCache
 from wis2box.oregon.types import (
     POTENTIAL_DATASTREAMS,
@@ -172,24 +173,6 @@ def to_oregon_datetime(date_str: datetime.datetime) -> str:
 def from_oregon_datetime(date_str: str) -> datetime.datetime:
     """Convert a datetime string into a datetime object"""
     return datetime.datetime.strptime(date_str, "%m/%d/%Y %I:%M:%S %p")
-
-
-def generate_FROST_batch_data(
-    sta_observations: list[dict],
-) -> list[FrostBatchRequest]:
-    body_data = []
-
-    for id, obs in enumerate(sta_observations):
-        body_data.append(
-            {
-                "id": f"{obs['Datastream']['@iot.id']}{id}",
-                "method": "post",
-                "url": "Observations",
-                "body": obs,
-            }
-        )
-    return body_data
-
 
 class UpdateMetadata(TypedDict):
     data_start: str

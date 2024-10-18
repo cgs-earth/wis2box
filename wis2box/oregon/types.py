@@ -4,15 +4,15 @@ from dataclasses import dataclass
 THINGS_COLLECTION = "Things"
 
 POTENTIAL_DATASTREAMS: dict[str,str] = {
-    "stage_instantaneous_available" : "Instantaneous_Stage",
-    "flow_instantaneous_available" : "Instantaneous_Flow",
     "mean_daily_flow_available": "MDF",
-    "water_temp_max_available": "WTEMP_MAX",
-    "water_temp_min_available": "WTEMP_MIN",
     "water_temp_mean_available": "WTEMP_MEAN",
-    "water_temp_instantaneous_avail": "WTEMP15",
-    "water_temp_measurement_avail": "WTEMP_MEASURE",
-    "measured_flow_available": "Measurements",
+    # "stage_instantaneous_available" : "Instantaneous_Stage",
+    # "flow_instantaneous_available" : "Instantaneous_Flow",
+    # "water_temp_measurement_avail": "WTEMP_MEASURE",
+    # "water_temp_instantaneous_avail": "WTEMP15",
+    # "water_temp_max_available": "WTEMP_MAX",
+    # "water_temp_min_available": "WTEMP_MIN",
+    # "measured_flow_available": "Measurements",
 
     # This has the available suffix but is not a datastream
     # "rating_curve_available": "N/A",
@@ -283,6 +283,12 @@ Datastream = TypedDict(
     },
 )
 
+class Observation(TypedDict):
+    resultTime: str 
+    Datastream: dict 
+    result: Optional[float] 
+    FeatureOfInterest: dict
+
 class OregonHttpResponse(TypedDict):
     geometryType: str
     fields: list
@@ -320,11 +326,10 @@ class ParsedTSVData():
     units: str
     dates: List[str]
 
-START_OF_DATA = "9/25/1850 12:00:00 AM" # random very old date. Need a very old value to get the start of the API
+START_OF_DATA = "9/25/1850 12:00:00 AM" # random very old date. Need a very old value to get the start of the API;
 
-
-class FrostBatchRequest():
+class FrostBatchRequest(TypedDict):
     id: str
     method: Literal["post"]
     url: Literal["Observations"]
-    body: dict 
+    body: Observation 
