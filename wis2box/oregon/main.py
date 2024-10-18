@@ -22,10 +22,12 @@
 import asyncio
 from collections import deque
 from datetime import datetime
+import itertools
 import json
 import aiohttp
 from typing import Coroutine, Optional, List
 import logging
+import httpx
 import requests
 from wis2box.api import remove_collection, setup_collection, upsert_collection_item
 from wis2box.env import API_BACKEND_URL
@@ -61,11 +63,28 @@ from wis2box.oregon.types import (
 
 LOGGER = logging.getLogger(__name__)
 
+
+def batched_it(iterable, n):
+    "Batch data into iterators of length n. The last batch may be shorter."
+    # batched('ABCDEFG', 3) --> ABC DEF G
+    if n < 1:
+        raise ValueError("n must be at least one")
+    it = iter(iterable)
+    while True:
+        chunk_it = itertools.islice(it, n)
+        try:
+            first_el = next(chunk_it)
+        except StopIteration:
+            return
+        yield itertools.chain((first_el,), chunk_it)
+
+
 # We have to implement this ourselves since wis2box is using py 3.9 and doesn't have this in itertools yet
 def batched(iterable, batch_size):
     length = len(iterable)
     for ndx in range(0, length, batch_size):
-        yield iterable[ndx:min(ndx + batch_size, length)]
+        yield iterable[ndx : min(ndx + batch_size, length)]
+
 
 class OregonStaRequestBuilder:
     """
@@ -140,9 +159,7 @@ class OregonStaRequestBuilder:
 
         return datastreams
 
-    async def _get_observations(
-        self, station: StationData, session: aiohttp.ClientSession
-    ):
+    async def _get_observations(self, station: StationData, session: httpx.AsyncClient):
         assert isinstance(station, dict)
         for id, datastream in enumerate(POTENTIAL_DATASTREAMS):
             attr: Attributes = station["attributes"]
@@ -156,14 +173,13 @@ class OregonStaRequestBuilder:
 
             LOGGER.debug(f"Fetching {tsv_url}")
             response = await session.get(tsv_url)
-            tsvParse: ParsedTSVData = parse_oregon_tsv(await response.read())
-
+            tsvParse: ParsedTSVData = parse_oregon_tsv(response.read())
 
             all_observations: list[Observation] = [
-                to_sensorthings_observation(attr, datapoint, date, id) for datapoint, date in zip(tsvParse.data, tsvParse.dates)
+                to_sensorthings_observation(attr, datapoint, date, id)
+                for datapoint, date in zip(tsvParse.data, tsvParse.dates)
             ]
             yield all_observations
-
 
     async def send(self) -> None:
         """Send the data to the FROST server"""
@@ -176,14 +192,12 @@ class OregonStaRequestBuilder:
             sta_station = to_sensorthings_station(station, datastreams)
             upsert_collection_item(THINGS_COLLECTION, sta_station)
 
-        async with aiohttp.ClientSession() as http_session:
+        async with httpx.AsyncClient(timeout=60*5) as http_session:
             upload_tasks: list[Coroutine] = []
             for station in stations:
 
                 async def upload_observations(station: StationData) -> None:
-                    observation_list = self._get_observations(
-                        station, http_session
-                    )
+                    observation_list = self._get_observations(station, http_session)
                     id: int = 0
                     async for observation_dataset in observation_list:
                         request = {"requests": []}
@@ -201,19 +215,25 @@ class OregonStaRequestBuilder:
                         LOGGER.error(
                             f"Sending batch observations for {station['attributes']['station_name']}"
                         )
+
                         resp = await http_session.post(
                             f"{API_BACKEND_URL}/$batch",
-                            data=json.dumps(request),
+                            json=request,
                             headers={"Content-Type": "application/json"},
                         )
-                        # # Proper status code to check is 201 for POST but sometimes the server returns 200 to signify success
-                        if resp.status != 200 and resp.status != 201:
+
+                        # Proper status code to check is 201 for POST but sometimes the server returns 200 to signify success
+                        if resp.status_code != 200 and resp.status_code != 201:
                             raise RuntimeError(
-                                f"Failed to insert observation into FROST. Got {resp.status} with content: {resp.content}"
+                                f"Failed to insert observation into FROST. Got {resp.status_code} with content: {resp.content}"
                             )
+
+                        id += 1
 
                 upload_tasks.append(upload_observations(station))
             await asyncio.gather(*upload_tasks)
+            LOGGER.error("Closing")
+            LOGGER.error("Done uploading to FROST")
 
 
 def load_data_into_frost(station: int, begin: Optional[str], end: Optional[str]):

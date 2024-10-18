@@ -4,6 +4,7 @@ import io
 import json
 import logging
 import os
+from pathlib import Path
 import aiohttp
 from requests import Session
 from urllib.parse import urlencode
@@ -186,8 +187,9 @@ class DataUpdateHelper:
 
     def __init__(self):
         # check if metadata.json exists if not create it
-        if not os.path.exists(self.metadata_file):
-            with open(self.metadata_file, "w") as f:
+        metadata_file_path = Path(__file__).parent / self.metadata_file
+        if not metadata_file_path.exists():
+            with open(metadata_file_path, "w") as f:
                 json.dump({"data_start": "", "data_end": ""}, f)
 
     def get_range(self) -> Tuple[str, str]:
