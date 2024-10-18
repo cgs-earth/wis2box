@@ -112,6 +112,9 @@ services:
     depends_on:
       - database
       - mosquitto
+    environment:
+      - logSensitiveData=true
+      - FROST_LL=DEBUG
 
   frost-mqtt:
     container_name: frost-mqtt
