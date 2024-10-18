@@ -26,9 +26,6 @@ def test_load_one_station_fully():
     # make sure you can ping  http://localhost:8999/oapi/collections/things/items/10378500
     assert requests.get(inserted_data_url).status_code == 200
     
-    data_insert_helper = DataUpdateHelper()
-    data_insert_helper.get_range()
-    
 def test_load_one_station_partially():
     """Try loading in https://apps.wrd.state.or.us/apps/sw/hydro_near_real_time/display_hydro_graph.aspx?station_nbr=14026000"""
     remove_collection(THINGS_COLLECTION) # teardown

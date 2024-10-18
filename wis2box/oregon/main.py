@@ -158,18 +158,11 @@ class OregonStaRequestBuilder:
             response = await session.get(tsv_url)
             tsvParse: ParsedTSVData = parse_oregon_tsv(await response.read())
 
-            buffer = deque(maxlen=60000)
 
-            for datapoint, date in zip(tsvParse.data, tsvParse.dates):
-                sta_formatted_data: Observation = to_sensorthings_observation(attr, datapoint, date, id)
-                buffer.append(sta_formatted_data)
-                
-                if len(buffer) == buffer.maxlen:
-                    LOGGER.error(f"sending {len(buffer)} observations to frost")
-                    yield list(buffer)
-
-            if buffer:
-                yield list(buffer)
+            all_observations: list[Observation] = [
+                to_sensorthings_observation(attr, datapoint, date, id) for datapoint, date in zip(tsvParse.data, tsvParse.dates)
+            ]
+            yield all_observations
 
 
     async def send(self) -> None:
@@ -188,11 +181,11 @@ class OregonStaRequestBuilder:
             for station in stations:
 
                 async def upload_observations(station: StationData) -> None:
-                    all_associated_datasets = self._get_observations(
+                    observation_list = self._get_observations(
                         station, http_session
                     )
                     id: int = 0
-                    async for observation_dataset in all_associated_datasets:
+                    async for observation_dataset in observation_list:
                         request = {"requests": []}
 
                         for single_observation in observation_dataset:
@@ -205,7 +198,7 @@ class OregonStaRequestBuilder:
 
                             request["requests"].append(request_encoded)
 
-                        LOGGER.debug(
+                        LOGGER.error(
                             f"Sending batch observations for {station['attributes']['station_name']}"
                         )
                         resp = await http_session.post(
