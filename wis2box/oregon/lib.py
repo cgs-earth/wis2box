@@ -5,7 +5,6 @@ import json
 import logging
 import os
 from pathlib import Path
-import aiohttp
 from requests import Session
 from urllib.parse import urlencode
 from typing import ClassVar, List, Optional, Tuple, TypedDict

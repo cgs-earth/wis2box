@@ -24,7 +24,6 @@ from collections import deque
 from datetime import datetime
 import itertools
 import json
-import aiohttp
 from typing import Coroutine, Optional, List
 import logging
 import httpx
