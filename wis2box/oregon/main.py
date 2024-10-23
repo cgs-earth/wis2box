@@ -271,11 +271,15 @@ def load_data_into_frost(station: int, begin: Optional[str], end: Optional[str])
         relevant_stations=relevant_stations, data_start=begin, data_end=end
     )
 
+    start_time = datetime.now()
     async def main():
         await builder.send()
 
     asyncio.run(main())
-    LOGGER.debug("Data loaded into FROST for stations: {}".format(relevant_stations))
+    end_time = datetime.now()
+    duration = (end_time - start_time).total_seconds() / 60
+
+    LOGGER.debug(f"Data loaded into FROST for stations: {relevant_stations} after {duration}")
 
 
 def update_data(stations: list[int], new_end: Optional[str]):

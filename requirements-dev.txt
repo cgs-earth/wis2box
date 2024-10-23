@@ -11,3 +11,4 @@ sphinx
 twine
 wheel
 wmo-sphinx-theme
+pytest

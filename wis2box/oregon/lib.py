@@ -186,10 +186,11 @@ class DataUpdateHelper:
 
     def __init__(self):
         # check if metadata.json exists if not create it
-        metadata_file_path = Path(__file__).parent / self.metadata_file
+        metadata_file_path = Path(self.metadata_file)
         if not metadata_file_path.exists():
             with open(metadata_file_path, "w") as f:
                 json.dump({"data_start": "", "data_end": ""}, f)
+                DataUpdateHelper.metadata_file = str(metadata_file_path)
 
     def get_range(self) -> Tuple[str, str]:
         """Get the range of data that has been downloaded"""

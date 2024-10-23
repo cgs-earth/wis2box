@@ -1,0 +1,4 @@
+# Place at /etc/caddy/Caddyfile and run with sudo caddy run --config /etc/caddy/Caddyfile
+:80 {
+	reverse_proxy localhost:8999
+}
