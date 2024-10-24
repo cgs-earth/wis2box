@@ -191,7 +191,7 @@ class OregonStaRequestBuilder:
             sta_station = to_sensorthings_station(station, datastreams)
             upsert_collection_item(THINGS_COLLECTION, sta_station)
 
-        async with httpx.AsyncClient(timeout=60*5) as http_session:
+        async with httpx.AsyncClient(timeout=None) as http_session:
             upload_tasks: list[Coroutine] = []
             for station in stations:
 
