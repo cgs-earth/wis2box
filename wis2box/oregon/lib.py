@@ -3,18 +3,14 @@ import datetime
 import io
 import json
 import logging
-import os
 from pathlib import Path
 from requests import Session
 from urllib.parse import urlencode
 from typing import ClassVar, List, Optional, Tuple, TypedDict
 
-from wis2box.env import API_BACKEND_URL, STORAGE_INCOMING
 from wis2box.oregon.cache import ShelveCache
 from wis2box.oregon.types import (
     POTENTIAL_DATASTREAMS,
-    Attributes,
-    FrostBatchRequest,
     OregonHttpResponse,
     Datastream,
     ParsedTSVData,
@@ -23,7 +19,7 @@ from wis2box.oregon.types import (
 LOGGER = logging.getLogger(__name__)
 
 
-def parse_oregon_tsv(response: bytes) -> ParsedTSVData:
+def parse_oregon_tsv(response: bytes, drop_rows_with_null_data: bool = True) -> ParsedTSVData:
     """Return the data column and the date column for a given tsv response"""
     # we just use the third column since the name of the dataset in the
     # url does not match the name in the result column. However,
@@ -43,13 +39,20 @@ def parse_oregon_tsv(response: bytes) -> ParsedTSVData:
             )
         units = header[2].split("_")[-1]
         for row in reader:
-            if len(row) >= 3:
-                if row[2] == "":
-                    data.append(None)
-                else:
-                    data.append(float(row[2]))
+            if len(row) < 3:
+                continue
+            STATION_NUMBER_COLUMN = row[0] # here just for documentation purposes  # noqa: F841
+            DATE_COLUMN = row[1]
+            RESULT_COLUMN = row[2]
+            if not RESULT_COLUMN:
+                continue
 
-            dates.append(parse_date(str(row[1])))
+            if RESULT_COLUMN == "":
+                data.append(None)
+            else:
+                data.append(float(row[2]))
+
+            dates.append(parse_date(str(DATE_COLUMN)))
 
     return ParsedTSVData(data, units, dates)
 
@@ -182,7 +185,7 @@ class UpdateMetadata(TypedDict):
 class DataUpdateHelper:
     """Helper class to determine what to download based on a local metadata file"""
 
-    metadata_file: ClassVar[str] = "oregon_metadata.json"
+    metadata_file: ClassVar[str] = "oregon_load_metadata.json"
 
     def __init__(self):
         # check if metadata.json exists if not create it

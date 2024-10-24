@@ -2,11 +2,12 @@ from typing import Optional
 from wis2box.oregon.types import Attributes, Datastream, Observation, StationData
 
 def to_sensorthings_observation(
-    attr: Attributes, datapoint: Optional[float], observation_time: str, id: int
+    attr: Attributes, datapoint: Optional[float], resultTime: str, phenom_time: str, id: int
 ) -> Observation:
     """Return the json body for a sensorthings observation insert to FROST"""
     return {
-        "resultTime": observation_time,
+        "phenomenonTime": phenom_time,
+        "resultTime": resultTime,
         "Datastream": {"@iot.id": int(f"{attr['station_nbr']}{id}")},
         "result": datapoint,
         "FeatureOfInterest": {

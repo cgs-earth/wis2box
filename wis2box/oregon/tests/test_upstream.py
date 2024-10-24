@@ -74,6 +74,7 @@ def test_very_old_date_same_as_no_start_date():
 
     
 def test_very_old_dates_are_the_same():
+    """Make sure that one date in the past with no data gives the same result as one in the past with no data. i.e. 1800 == 1850"""
     response: bytes = download_oregon_tsv(
         "mean_daily_flow_available", 10371500, start_date="4/7/1800 11:00:00 AM", end_date="4/7/2000 11:00:00 AM"
     )
@@ -87,6 +88,15 @@ def test_very_old_dates_are_the_same():
     assert very_old_result_1.dates == very_old_result_2.dates
     assert very_old_result_1.data == very_old_result_2.data
     assert very_old_result_1.units == very_old_result_2.units
+
+def test_old_data_has_many_null_values():
+    response: bytes = download_oregon_tsv(
+        "mean_daily_flow_available", 10371500, start_date="4/7/1800 11:00:00 AM", end_date="4/7/1890 11:00:00 AM"
+    )
+    result = parse_oregon_tsv(response, drop_rows_with_null_data=False)
+    # filter out all None values
+    null_values = [data for data in result.data if data is None]
+    assert  len(null_values) > 500
 
 def test_how_many_observations_in_full_station():
     begin = START_OF_DATA

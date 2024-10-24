@@ -175,7 +175,7 @@ class OregonStaRequestBuilder:
             tsvParse: ParsedTSVData = parse_oregon_tsv(response.read())
 
             all_observations: list[Observation] = [
-                to_sensorthings_observation(attr, datapoint, date, id)
+                to_sensorthings_observation(attr, datapoint, date, date, id)
                 for datapoint, date in zip(tsvParse.data, tsvParse.dates)
             ]
             yield all_observations
@@ -211,8 +211,8 @@ class OregonStaRequestBuilder:
 
                             request["requests"].append(request_encoded)
 
-                        LOGGER.error(
-                            f"Sending batch observations for {station['attributes']['station_name']}"
+                        LOGGER.info(
+                            f"Sending batch observations for {station['attributes']['station_name']} to FROST"
                         )
 
                         resp = await http_session.post(
@@ -231,8 +231,7 @@ class OregonStaRequestBuilder:
 
                 upload_tasks.append(upload_observations(station))
             await asyncio.gather(*upload_tasks)
-            LOGGER.error("Closing")
-            LOGGER.error("Done uploading to FROST")
+            LOGGER.info("Done uploading to FROST")
 
 
 def load_data_into_frost(station: int, begin: Optional[str], end: Optional[str]):
@@ -277,9 +276,9 @@ def load_data_into_frost(station: int, begin: Optional[str], end: Optional[str])
 
     asyncio.run(main())
     end_time = datetime.now()
-    duration = (end_time - start_time).total_seconds() / 60
+    duration = round((end_time - start_time).total_seconds() / 60, 3)
 
-    LOGGER.debug(f"Data loaded into FROST for stations: {relevant_stations} after {duration}")
+    LOGGER.info(f"Data loaded into FROST for stations: {relevant_stations} after {duration} minutes")
 
 
 def update_data(stations: list[int], new_end: Optional[str]):
@@ -298,7 +297,7 @@ def update_data(stations: list[int], new_end: Optional[str]):
     builder = OregonStaRequestBuilder(
         relevant_stations=stations, data_start=new_start, data_end=new_end
     )
-    LOGGER.error(f"Updating data from {new_start} to {new_end}")
+    LOGGER.info(f"Updating data from {new_start} to {new_end}")
 
     async def main():
         await builder.send()

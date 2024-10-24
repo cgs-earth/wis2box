@@ -277,7 +277,7 @@ Datastream = TypedDict(
         "observationType": str,
         "unitOfMeasurement": UnitOfMeasurement,
         "ObservedProperty": dict[str, str],
-        # "phenomenonTime": NotRequired[str],
+        # "phenomenonTime": str,
         # "resultTime": NotRequired[str], # not present in python 3.9 
         "Sensor": dict,
     },
@@ -285,6 +285,7 @@ Datastream = TypedDict(
 
 class Observation(TypedDict):
     resultTime: str 
+    phenomenonTime: str
     Datastream: dict 
     result: Optional[float] 
     FeatureOfInterest: dict
