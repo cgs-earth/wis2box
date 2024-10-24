@@ -9,6 +9,8 @@ services:
       - "9001:9001"
     deploy:
       replicas: 1
+    volumes:
+      - wis2box-minio-data:/data
 
   mosquitto:
     ports:
@@ -18,3 +20,6 @@ services:
   frost-mqtt:
     ports:
       - 9876:9876
+
+volumes:
+  wis2box-minio-data:
