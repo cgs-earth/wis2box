@@ -34,7 +34,7 @@ def update(ctx, verbosity, station: int):
 @click.pass_context
 @cli_helpers.OPTION_VERBOSITY
 def delete(ctx, verbosity):
-    """Delete a collection of stations from the API config and backend"""
+    """Delete all oregon observations"""
     remove_collection(THINGS_COLLECTION)
 
 

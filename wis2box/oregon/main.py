@@ -235,7 +235,6 @@ class OregonStaRequestBuilder:
 
 
 def load_data_into_frost(station: int, begin: Optional[str], end: Optional[str]):
-    remove_collection(THINGS_COLLECTION)
 
     METADATA = {
         "id": THINGS_COLLECTION,
