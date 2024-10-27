@@ -9,7 +9,7 @@ from wis2box.oregon.lib import (
 import datetime
 import pytest
 from wis2box.oregon.main import OregonStaRequestBuilder
-from wis2box.oregon.types import ALL_RELEVANT_STATIONS, POTENTIAL_DATASTREAMS, StationData, THINGS_COLLECTION
+from wis2box.oregon.types import ALL_RELEVANT_STATIONS, POTENTIAL_DATASTREAMS, StationData
 
 def test_download():
     response: bytes = download_oregon_tsv(
