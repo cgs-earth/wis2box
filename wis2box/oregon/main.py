@@ -159,7 +159,7 @@ class OregonStaRequestBuilder:
             LOGGER.info(f"Fetching {tsv_url}")
             try:
                 tsvBytes = await response.aread()
-            except httpx.ProtocolError as e:
+            except httpx.ReadError as e:
                 LOGGER.error(f"Failed to fetch {tsv_url}: {e}")
                 continue
 
