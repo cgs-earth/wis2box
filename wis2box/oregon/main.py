@@ -25,6 +25,7 @@ from typing import Coroutine, Optional, List
 import logging
 import concurrent.futures
 import httpx
+from httpx import AsyncHTTPTransport
 import requests
 from wis2box.api import setup_collection, upsert_collection_item
 from wis2box.env import API_BACKEND_URL
@@ -192,7 +193,8 @@ class OregonStaRequestBuilder:
 
         # Next, async load the associated observations into FROST
         async with httpx.AsyncClient(
-            timeout=None
+            timeout=None,
+            transport=httpx.AsyncHTTPTransport(retries=3)
         ) as http_session:  # no timeout since the load can take a long time on a VM
             upload_tasks: list[Coroutine] = []
             semaphore = asyncio.Semaphore(10) # this is needed since if you send too many requests to Oregon at once, it will close the session for some reason and you'll get an error
