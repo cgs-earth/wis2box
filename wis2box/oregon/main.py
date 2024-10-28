@@ -154,10 +154,15 @@ class OregonStaRequestBuilder:
                 response = await session.get(tsv_url)
             except httpx.ProtocolError as e:
                 LOGGER.error(f"Failed to fetch {tsv_url}: {e}")
-                raise
+                continue
 
             LOGGER.info(f"Fetching {tsv_url}")
-            tsvBytes = await response.aread()
+            try:
+                tsvBytes = await response.aread()
+            except httpx.ProtocolError as e:
+                LOGGER.error(f"Failed to fetch {tsv_url}: {e}")
+                continue
+
             tsvParse: ParsedTSVData = parse_oregon_tsv(tsvBytes)
 
             all_observations: list[Observation] = [
@@ -190,6 +195,8 @@ class OregonStaRequestBuilder:
                 )
                 sta_station = to_sensorthings_station(station, datastreams)
                 upsert_collection_item(THINGS_COLLECTION, sta_station)
+
+        stations_done = 0
 
         # Next, async load the associated observations into FROST
         async with httpx.AsyncClient(
@@ -235,6 +242,12 @@ class OregonStaRequestBuilder:
                                 continue
 
                             id += 1
+
+                    nonlocal stations_done
+                    stations_done += 1
+                    LOGGER.info(
+                        f"Done with {station['attributes']['station_name']}. Finished ({stations_done}/{len(stations)})"
+                    )
 
                 upload_tasks.append(upload_observations(station))
 
