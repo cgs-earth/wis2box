@@ -1,8 +1,12 @@
+import asyncio
 import datetime
 import os
+import time
+
+import httpx
 from wis2box.api import remove_collection
 from wis2box.oregon.lib import DataUpdateHelper, to_oregon_datetime
-from wis2box.oregon.main import THINGS_COLLECTION, load_data_into_frost, update_data
+from wis2box.oregon.main import THINGS_COLLECTION, OregonStaRequestBuilder, load_data_into_frost, update_data
 import requests
 import logging
 from wis2box.oregon.types import ALL_RELEVANT_STATIONS
@@ -66,3 +70,24 @@ def test_load_partially_then_update():
     date = datetime.datetime.fromisoformat(new_result.replace("Z", "+00:00"))
     # make sure the date is within the last month; rough estimate. just making sure the update got new data
     assert date > datetime.datetime.now() - datetime.timedelta(days=30)
+
+
+def test_get_many_observations_in_async():
+    """Check to make sure that the server doesn't kick us out if we try to make too many requests to observation endpoints asynchronously"""
+    async def main():
+        builder = OregonStaRequestBuilder(ALL_RELEVANT_STATIONS, "01/01/1850 12:00:00 AM", "01/15/2024 12:00:00 AM")
+        stationMetadata = builder._get_upstream_data()
+        tasks = []
+        async with httpx.AsyncClient(timeout=None) as client:
+            for station in stationMetadata:
+
+                async def get_observations():
+                    LOGGER.info(f"Processing {station['attributes']['station_nbr']}")
+                    res = builder._get_observations(station, client)
+                    async for _ in res:
+                        pass # consume the generator
+
+                tasks.append(asyncio.create_task(get_observations()))
+            await asyncio.gather(*tasks)
+
+    asyncio.run(main())

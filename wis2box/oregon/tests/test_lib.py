@@ -1,4 +1,3 @@
-from wis2box.api import remove_collection
 from wis2box.oregon.lib import (
     DataUpdateHelper,
     assert_valid_date,
@@ -6,6 +5,7 @@ from wis2box.oregon.lib import (
     parse_oregon_tsv,
     from_oregon_datetime,
 )
+from wis2box.oregon.sta_generation import to_sensorthings_datastream
 import datetime
 import pytest
 from wis2box.oregon.main import OregonStaRequestBuilder
@@ -66,8 +66,11 @@ def test_station_metadata_has_expected_datastreams():
 def test_datastream_generation():
     builder = OregonStaRequestBuilder(ALL_RELEVANT_STATIONS, "10/1/2023 12:00:00 AM", "10/2/2023 12:00:00 AM")
     response: list[StationData] = builder._get_upstream_data()
-    sta_datastreams, _ = builder._generate_datastreams_and_observations(response[0])
-    assert len(sta_datastreams) <= len(POTENTIAL_DATASTREAMS)
+    streams = []
+    for station in response:
+        sta_datastream = to_sensorthings_datastream(station["attributes"], units="Celcius", phenom_time=None, stream_name="test", id=0)
+        streams.append(sta_datastream)
+    assert len(streams) <= len(POTENTIAL_DATASTREAMS)
 
 def test_data_update_helper():
     data_range_setter = DataUpdateHelper() 

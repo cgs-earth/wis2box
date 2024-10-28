@@ -20,15 +20,13 @@
 ###############################################################################
 
 import asyncio
-from collections import deque
 from datetime import datetime
-import itertools
-import json
 from typing import Coroutine, Optional, List
 import logging
+import concurrent.futures
 import httpx
 import requests
-from wis2box.api import remove_collection, setup_collection, upsert_collection_item
+from wis2box.api import setup_collection, upsert_collection_item
 from wis2box.env import API_BACKEND_URL
 from wis2box.oregon.lib import (
     DataUpdateHelper,
@@ -61,28 +59,6 @@ from wis2box.oregon.types import (
 )
 
 LOGGER = logging.getLogger(__name__)
-
-
-def batched_it(iterable, n):
-    "Batch data into iterators of length n. The last batch may be shorter."
-    # batched('ABCDEFG', 3) --> ABC DEF G
-    if n < 1:
-        raise ValueError("n must be at least one")
-    it = iter(iterable)
-    while True:
-        chunk_it = itertools.islice(it, n)
-        try:
-            first_el = next(chunk_it)
-        except StopIteration:
-            return
-        yield itertools.chain((first_el,), chunk_it)
-
-
-# We have to implement this ourselves since wis2box is using py 3.9 and doesn't have this in itertools yet
-def batched(iterable, batch_size):
-    length = len(iterable)
-    for ndx in range(0, length, batch_size):
-        yield iterable[ndx : min(ndx + batch_size, length)]
 
 
 class OregonStaRequestBuilder:
@@ -156,6 +132,8 @@ class OregonStaRequestBuilder:
                 )
             )
 
+        LOGGER.info(f"Found {len(datastreams)} datastreams for {attr['station_name']}")
+
         return datastreams
 
     async def _get_observations(self, station: StationData, session: httpx.AsyncClient):
@@ -171,70 +149,99 @@ class OregonStaRequestBuilder:
             )
 
             LOGGER.debug(f"Fetching {tsv_url}")
-            response = await session.get(tsv_url)
-            tsvParse: ParsedTSVData = parse_oregon_tsv(response.read())
+            try:
+                response = await session.get(tsv_url)
+            except httpx.ProtocolError as e:
+                LOGGER.error(f"Failed to fetch {tsv_url}: {e}")
+                raise
+
+            LOGGER.info(f"Fetching {tsv_url}")
+            tsvBytes = await response.aread()
+            tsvParse: ParsedTSVData = parse_oregon_tsv(tsvBytes)
 
             all_observations: list[Observation] = [
                 to_sensorthings_observation(attr, datapoint, date, date, id)
                 for datapoint, date in zip(tsvParse.data, tsvParse.dates)
             ]
+
             yield all_observations
 
     async def send(self) -> None:
-        """Send the data to the FROST server"""
+        """Send the data to the FROST server. This is the core public function for this class"""
         stations = self._get_upstream_data()
-        for station in stations:
-            LOGGER.info(
-                f"Generating data for station {station['attributes']['station_nbr']}"
-            )
-            datastreams: list[Datastream] = self._get_datastreams(station)
-            sta_station = to_sensorthings_station(station, datastreams)
-            upsert_collection_item(THINGS_COLLECTION, sta_station)
 
-        async with httpx.AsyncClient(timeout=None) as http_session:
+        # First put the metadata about each station into wis2box without the observations
+        # We use a threadpool since upsert isn't async
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = {}
+            for station in stations:
+                # Store the future with the station as key
+                future = executor.submit(self._get_datastreams, station)
+                futures[future] = station  # Mapping future to the corresponding station
+
+            for future in concurrent.futures.as_completed(futures):
+                datastreams: list[Datastream] = future.result()
+                station = futures[
+                    future
+                ]  # Retrieve the station associated with the future
+                LOGGER.info(
+                    f"Upserting metadata for station {station['attributes']['station_nbr']}"
+                )
+                sta_station = to_sensorthings_station(station, datastreams)
+                upsert_collection_item(THINGS_COLLECTION, sta_station)
+
+        # Next, async load the associated observations into FROST
+        async with httpx.AsyncClient(
+            timeout=None
+        ) as http_session:  # no timeout since the load can take a long time on a VM
             upload_tasks: list[Coroutine] = []
+            semaphore = asyncio.Semaphore(10) # this is needed since if you send too many requests to Oregon at once, it will close the session for some reason and you'll get an error
             for station in stations:
 
                 async def upload_observations(station: StationData) -> None:
-                    observation_list = self._get_observations(station, http_session)
-                    id: int = 0
-                    async for observation_dataset in observation_list:
-                        request = {"requests": []}
+                    async with semaphore:
+                        observation_list = self._get_observations(station, http_session)
+                        id: int = 0
+                        async for observation_dataset in observation_list:
+                            request = {"requests": []}
 
-                        for single_observation in observation_dataset:
-                            request_encoded: FrostBatchRequest = {
-                                "id": f"{single_observation['Datastream']['@iot.id']}{id}",
-                                "method": "post",
-                                "url": "Observations",
-                                "body": single_observation,
-                            }
+                            for single_observation in observation_dataset:
+                                request_encoded: FrostBatchRequest = {
+                                    "id": f"{single_observation['Datastream']['@iot.id']}{id}",
+                                    "method": "post",
+                                    "url": "Observations",
+                                    "body": single_observation,
+                                }
 
-                            request["requests"].append(request_encoded)
+                                request["requests"].append(request_encoded)
 
-                        LOGGER.info(
-                            f"Sending batch observations for {station['attributes']['station_name']} to FROST"
-                        )
-
-                        resp = await http_session.post(
-                            f"{API_BACKEND_URL}/$batch",
-                            json=request,
-                            headers={"Content-Type": "application/json"},
-                        )
-
-                        # Proper status code to check is 201 for POST but sometimes the server returns 200 to signify success
-                        if resp.status_code != 200 and resp.status_code != 201:
-                            raise RuntimeError(
-                                f"Failed to insert observation into FROST. Got {resp.status_code} with content: {resp.content}"
+                            LOGGER.info(
+                                f"Sending batch observations for {station['attributes']['station_name']} to FROST"
                             )
 
-                        id += 1
+                            resp = await http_session.post(
+                                f"{API_BACKEND_URL}/$batch",
+                                json=request,
+                                headers={"Content-Type": "application/json"},
+                            )
+
+                            # Proper status code to check is 201 for POST but sometimes the server returns 200 to signify success
+                            if resp.status_code != 200 and resp.status_code != 201:
+                                LOGGER.error(
+                                    f"Failed to insert observation into FROST. Got {resp.status_code} with content: {resp.content} and latlong, {station['attributes']['latitude_dec']}, {station['attributes']['longitude_dec']}"
+                                )
+                                continue
+
+                            id += 1
 
                 upload_tasks.append(upload_observations(station))
+
             await asyncio.gather(*upload_tasks)
             LOGGER.info("Done uploading to FROST")
 
 
 def load_data_into_frost(station: int, begin: Optional[str], end: Optional[str]):
+    """Load a station number with an associated start and end date into FROST"""
 
     METADATA = {
         "id": THINGS_COLLECTION,
@@ -270,6 +277,7 @@ def load_data_into_frost(station: int, begin: Optional[str], end: Optional[str])
     )
 
     start_time = datetime.now()
+
     async def main():
         await builder.send()
 
@@ -277,7 +285,9 @@ def load_data_into_frost(station: int, begin: Optional[str], end: Optional[str])
     end_time = datetime.now()
     duration = round((end_time - start_time).total_seconds() / 60, 3)
 
-    LOGGER.info(f"Data loaded into FROST for stations: {relevant_stations} after {duration} minutes")
+    LOGGER.info(
+        f"Data loaded into FROST for stations: {relevant_stations} after {duration} minutes"
+    )
 
 
 def update_data(stations: list[int], new_end: Optional[str]):

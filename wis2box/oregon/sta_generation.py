@@ -5,12 +5,16 @@ def to_sensorthings_observation(
     attr: Attributes, datapoint: Optional[float], resultTime: str, phenom_time: str, id: int
 ) -> Observation:
     """Return the json body for a sensorthings observation insert to FROST"""
+    if datapoint is None:
+        raise RuntimeError("Missing datapoint")
+    
     return {
         "phenomenonTime": phenom_time,
         "resultTime": resultTime,
         "Datastream": {"@iot.id": int(f"{attr['station_nbr']}{id}")},
         "result": datapoint,
         "FeatureOfInterest": {
+            "@iot.id": attr["station_nbr"],
             "name": attr["station_name"],
             "description": attr["station_name"],
             "encodingType": "application/vnd.geo+json",
@@ -35,6 +39,7 @@ def to_sensorthings_station(station: StationData, datastreams: list[Datastream])
         "description": attr["station_name"],
         "Locations": [
             {
+                "@iot.id": attr["station_nbr"],
                 "name": attr["station_name"],
                 "description": attr["station_name"],
                 "encodingType": "application/vnd.geo+json",
@@ -69,6 +74,7 @@ def to_sensorthings_datastream(attr: Attributes, units: str, phenom_time: Option
             "definition": units,
         },
         "ObservedProperty": {
+            "@iot.id": property,
             "name": property,
             "description": property,
             "definition": "Unknown",

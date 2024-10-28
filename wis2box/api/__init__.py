@@ -94,7 +94,7 @@ def remove_collection(name: str) -> bool:
 
 
 def upsert_collection_item(collection_id: str, item: dict,
-                           method: str = 'POST') -> str:
+                           method: str = 'POST'):
     """
     Add or update a collection item
 

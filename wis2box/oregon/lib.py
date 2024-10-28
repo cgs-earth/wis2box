@@ -45,9 +45,8 @@ def parse_oregon_tsv(response: bytes, drop_rows_with_null_data: bool = True) -> 
             DATE_COLUMN = row[1]
             RESULT_COLUMN = row[2]
             if not RESULT_COLUMN:
-                continue
-
-            if RESULT_COLUMN == "":
+                if drop_rows_with_null_data:
+                    continue
                 data.append(None)
             else:
                 data.append(float(row[2]))

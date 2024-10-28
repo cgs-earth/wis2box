@@ -1,8 +1,9 @@
 from datetime import datetime
-from wis2box.oregon.lib import download_oregon_tsv, parse_oregon_tsv, to_oregon_datetime
+
+from wis2box.oregon.lib import download_oregon_tsv, generate_oregon_tsv_url, parse_oregon_tsv, to_oregon_datetime
 import pytest
 from collections import Counter
-
+import requests
 from wis2box.oregon.types import START_OF_DATA
 
 @pytest.mark.parametrize("end_date", ["10/7/2022 12:00:00 AM", "10/7/2024 12:00:00 AM", "4/7/2000 11:00:00 AM"])
@@ -90,9 +91,8 @@ def test_very_old_dates_are_the_same():
     assert very_old_result_1.units == very_old_result_2.units
 
 def test_old_data_has_many_null_values():
-    response: bytes = download_oregon_tsv(
-        "mean_daily_flow_available", 10371500, start_date="4/7/1800 11:00:00 AM", end_date="4/7/1890 11:00:00 AM"
-    )
+    tsv_url = generate_oregon_tsv_url("mean_daily_flow_available", 10371500, start_date="4/7/1800 11:00:00 AM", end_date="4/7/1890 11:00:00 AM")
+    response = requests.get(tsv_url).content
     result = parse_oregon_tsv(response, drop_rows_with_null_data=False)
     # filter out all None values
     null_values = [data for data in result.data if data is None]
@@ -105,6 +105,7 @@ def test_how_many_observations_in_full_station():
     response: bytes = download_oregon_tsv(
         "mean_daily_flow_available", 10371500, start_date=begin, end_date=end
     )
-    result = parse_oregon_tsv(response)
+    result = parse_oregon_tsv(response, drop_rows_with_null_data=False)
     length = len(result.dates)
-    assert length == 56540 == len(result.dates)
+    assert length == len(result.dates)
+    assert length > 56540 # we can't test an exact number here since the oregon data is consistently updating. But must be at least bigger than this value we got on Oct 28 2024 

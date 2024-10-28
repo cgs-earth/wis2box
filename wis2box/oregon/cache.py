@@ -20,7 +20,7 @@ class ShelveCache:
     def get_or_fetch(self, url: str, force_fetch: bool = False) -> Tuple[bytes, int]:
         with shelve.open(ShelveCache.db) as db:
             if url in db and not force_fetch:
-                LOGGER.debug(f"Using cache for {url}")
+                LOGGER.info(f"Using cache for {url}")
                 return db[url], 200
             else:
                 res = requests.get(url, headers=HEADERS)
