@@ -149,10 +149,9 @@ class OregonStaRequestBuilder:
                 datastream, int(attr["station_nbr"]), self.data_start, self.data_end
             )
 
-            LOGGER.debug(f"Fetching {tsv_url}")
             try:
                 response = await session.get(tsv_url)
-            except httpx.ProtocolError as e:
+            except httpx.ProtocolError as e: # TODO also check read error
                 LOGGER.error(f"Failed to fetch {tsv_url}: {e}")
                 continue
 

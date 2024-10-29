@@ -16,8 +16,9 @@ services:
     image: internetofwater/hub2box-ui:iow
     env_file:
       - default.env
-      - sta.env
       - ../dev.env
+      - sta.env
+
     depends_on:
       - wis2box-api
 
@@ -26,8 +27,9 @@ services:
     image: ghcr.io/cgs-earth/hub2box-api:latest
     env_file:
       - default.env
-      - sta.env
       - ../dev.env
+      - sta.env
+
     restart: always
     volumes:
       - api-config:/data/wis2box/config/pygeoapi/:rw
@@ -107,22 +109,24 @@ services:
     image: fraunhoferiosb/frost-server-http:2.0
     env_file:
       - default.env
-      - sta.env
       - ../dev.env
+      - sta.env
+
     depends_on:
       - database
       - mosquitto
     environment:
       - logSensitiveData=true
-      - FROST_LL=DEBUG
+      # - FROST_LL=DEBUG # default is info. DEBUG causes log spam.
 
   frost-mqtt:
     container_name: frost-mqtt
     image: fraunhoferiosb/frost-server-mqtt:2.0
     env_file:
       - default.env
-      - sta.env
       - ../dev.env
+      - sta.env
+
     depends_on:
       - database
       - mosquitto
@@ -133,8 +137,9 @@ services:
       context: ./database
     env_file:
       - default.env
-      - sta.env
       - ../dev.env
+      - sta.env
+
     volumes:
       - postgis_volume:/var/lib/postgresql/data
 
