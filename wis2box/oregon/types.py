@@ -6,6 +6,10 @@ THINGS_COLLECTION = "Things"
 POTENTIAL_DATASTREAMS: dict[str,str] = {
     "mean_daily_flow_available": "MDF",
     "water_temp_mean_available": "WTEMP_MEAN",
+
+    ### Datastreams we can extract but we are choosing not to at the moment
+    ### due to the time it takes to extract them
+
     # "stage_instantaneous_available" : "Instantaneous_Stage",
     # "flow_instantaneous_available" : "Instantaneous_Flow",
     # "water_temp_measurement_avail": "WTEMP_MEASURE",
@@ -256,12 +260,12 @@ class Period(TypedDict):
 class Threshold(TypedDict):
     Name: str
     Type: str
-    Periods: List[Period]
+    Periods: list[Period]
     ReferenceCode: str
 
 
 class Properties(TypedDict, total=False):
-    Thresholds: List[Threshold]
+    Thresholds: list[Threshold]
     ParameterCode: Optional[str]
     StatisticCode: Optional[str]
     # Add other optional properties here if needed
@@ -323,9 +327,9 @@ DATASTREAM_COLLECTION_METADATA = {
 
 @dataclass
 class ParsedTSVData():
-    data: List[Optional[float]]
+    data: list[Optional[float]]
     units: str
-    dates: List[str]
+    dates: list[str]
 
 START_OF_DATA = "9/25/1850 12:00:00 AM" # random very old date. Need a very old value to get the start of the API;
 

@@ -1,11 +1,11 @@
 import asyncio
 import datetime
 import os
-import time
 
 import httpx
 from wis2box.api import remove_collection
-from wis2box.oregon.lib import DataUpdateHelper, to_oregon_datetime
+from wis2box.oregon.helper_classes import CrawlResultStore
+from wis2box.oregon.lib import to_oregon_datetime
 from wis2box.oregon.main import THINGS_COLLECTION, OregonStaRequestBuilder, load_data_into_frost, update_data
 import requests
 import logging
@@ -26,7 +26,7 @@ def test_load_one_station_fully():
     inserted_data_url = f"{api_url}/collections/things/items/10378500"
     assert requests.get(inserted_data_url).status_code == 500
     remove_collection(THINGS_COLLECTION)
-    load_data_into_frost(10378500, None, None)
+    load_data_into_frost([10378500], None, None)
     # make sure you can ping  http://localhost:8999/oapi/collections/things/items/10378500
     assert requests.get(inserted_data_url).status_code == 200
     
@@ -40,9 +40,9 @@ def test_load_one_station_partially():
 
     assert requests.get(f"{api_url}/collections/things/items").json()["numberReturned"] == 0
 
-    load_data_into_frost(item, "01/01/2023 12:00:00 AM", "01/15/2023 12:00:00 AM")
+    load_data_into_frost([item], "01/01/2023 12:00:00 AM", "01/15/2023 12:00:00 AM")
     assert requests.get(inserted_data_url).status_code == 200
-    date_range = DataUpdateHelper().get_range()
+    date_range = CrawlResultStore().get_range()
     assert date_range == ("01/01/2023 12:00:00 AM", "01/15/2023 12:00:00 AM")
 
 
@@ -52,9 +52,9 @@ def test_load_partially_then_update():
     item = 14026000
     inserted_data_url = f"{api_url}/collections/things/items/{item}"
 
-    load_data_into_frost(item, "01/01/2024 12:00:00 AM", "01/15/2024 12:00:00 AM")
+    load_data_into_frost([item], "01/01/2024 12:00:00 AM", "01/15/2024 12:00:00 AM")
     assert requests.get(inserted_data_url).status_code == 200
-    date_range = DataUpdateHelper().get_range()
+    date_range = CrawlResultStore().get_range()
     assert date_range == ("01/01/2024 12:00:00 AM", "01/15/2024 12:00:00 AM")
 
     update_time = to_oregon_datetime(datetime.datetime.now())
@@ -63,7 +63,7 @@ def test_load_partially_then_update():
     LOGGER.info(f"Updating data to contain data from {update_time}")
     update_data([item],update_time)
 
-    assert DataUpdateHelper().get_range() == ("01/01/2024 12:00:00 AM", update_time)
+    assert CrawlResultStore().get_range() == ("01/01/2024 12:00:00 AM", update_time)
     new_data= requests.get(f"{api_url}/collections/observations/items/158205")
     assert new_data.status_code == 200
     new_result: str = new_data.json()["properties"]["resultTime"]

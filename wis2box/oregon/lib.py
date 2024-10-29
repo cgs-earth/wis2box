@@ -1,18 +1,15 @@
 import csv
 import datetime
 import io
-import json
 import logging
-from pathlib import Path
 from requests import Session
 from urllib.parse import urlencode
-from typing import ClassVar, List, Optional, Tuple, TypedDict
+from typing import List, Optional 
 
 from wis2box.oregon.cache import ShelveCache
 from wis2box.oregon.types import (
     POTENTIAL_DATASTREAMS,
     OregonHttpResponse,
-    Datastream,
     ParsedTSVData,
 )
 
@@ -131,10 +128,10 @@ class OregonHttpClient:
     def __init__(self):
         self.session = Session()
 
-    def fetch_stations(self, station_numbers: List[int]) -> OregonHttpResponse:
+    def fetch_stations(self, station_numbers: list[int]) -> OregonHttpResponse:
         """Fetches stations given a list of station numbers."""
         params = {
-            "where": self.format_where_param(station_numbers),
+            "where": self._format_where_param(station_numbers),
             "outFields": "*",
             "f": "json",
         }
@@ -150,7 +147,7 @@ class OregonHttpClient:
         else:
             raise RuntimeError(response.url)
 
-    def format_where_param(self, station_numbers: List[int]) -> str:
+    def _format_where_param(self, station_numbers: list[int]) -> str:
         wrapped_with_quotes = [f"'{station}'" for station in station_numbers]
         formatted_stations = " , ".join(wrapped_with_quotes)
         query = f"station_nbr IN ({formatted_stations})"
@@ -176,42 +173,3 @@ def from_oregon_datetime(date_str: str) -> datetime.datetime:
     """Convert a datetime string into a datetime object"""
     return datetime.datetime.strptime(date_str, "%m/%d/%Y %I:%M:%S %p")
 
-class UpdateMetadata(TypedDict):
-    data_start: str
-    data_end: str
-
-
-class DataUpdateHelper:
-    """Helper class to determine what to download based on a local metadata file"""
-
-    metadata_file: ClassVar[str] = "oregon_load_metadata.json"
-
-    def __init__(self):
-        # check if metadata.json exists if not create it
-        metadata_file_path = Path(self.metadata_file)
-        if not metadata_file_path.exists():
-            with open(metadata_file_path, "w") as f:
-                json.dump({"data_start": "", "data_end": ""}, f)
-                DataUpdateHelper.metadata_file = str(metadata_file_path)
-
-    def get_range(self) -> Tuple[str, str]:
-        """Get the range of data that has been downloaded"""
-        with open(self.metadata_file, "r") as f:
-            metadata: UpdateMetadata = json.load(f)
-        assert_valid_date(metadata["data_start"])
-        assert_valid_date(metadata["data_end"])
-        return (metadata["data_start"], metadata["data_end"])
-
-    def update_range(self, start: str, end: str):
-        """Update the range of dates of data that has been downloaded"""
-        # make sure that start and end are valid dates
-        assert_valid_date(start)
-        assert_valid_date(end)
-
-        with open(self.metadata_file, "r") as f:
-            metadata: UpdateMetadata = json.load(f)
-
-        metadata["data_start"] = start
-        metadata["data_end"] = end
-        with open(self.metadata_file, "w") as f:
-            json.dump(metadata, f)

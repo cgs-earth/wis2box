@@ -1,34 +1,46 @@
 import os
-import click
 from typing import Optional
+
+import click
+import pytest
+
 from wis2box import cli_helpers
 from wis2box.api import remove_collection, setup_collection
 from wis2box.oregon.main import load_data_into_frost, update_data
-from wis2box.oregon.types import ALL_RELEVANT_STATIONS, DATASTREAM_COLLECTION_METADATA, OBSERVATION_COLLECTION_METADATA
-from wis2box.oregon.types import THINGS_COLLECTION
-import pytest
+from wis2box.oregon.types import (
+    ALL_RELEVANT_STATIONS,
+    DATASTREAM_COLLECTION_METADATA,
+    OBSERVATION_COLLECTION_METADATA,
+    THINGS_COLLECTION,
+)
+
 
 @click.command()
 @click.pass_context
-@click.option("--station", "-s", default="*", help="station identifier")
+@click.option("--stations", "-s", default="all", help="station identifier", callback=lambda _,__,x: x.split(',') if x else [])
 @click.option("--begin", "-b", help="data start date", type=str)
 @click.option("--end", "-e", help="data end date", type=str)
 @cli_helpers.OPTION_VERBOSITY
-def load(ctx, verbosity, station: int , begin: Optional[str] , end: Optional[str]):
+def load(ctx, verbosity, stations: list[int] , begin: Optional[str] , end: Optional[str]):
     """Loads stations into sensorthings backend"""
-    load_data_into_frost(station, begin, end)
+    if stations == ["all"]:
+        load_data_into_frost(ALL_RELEVANT_STATIONS, begin, end)
+    else:
+        stations = list(map(int, stations))
+        load_data_into_frost(stations, begin, end)
     
 
 @click.command()
 @click.pass_context
 @cli_helpers.OPTION_VERBOSITY
-@click.option("--station", "-s", default="*", help="station identifier", type=str)
-def update(ctx, verbosity, station: int):
+@click.option("--stations", "-s", default=["all"], help="station identifier", callback=lambda _,__,x: x.split(',') if x else [])
+def update(ctx, verbosity, stations: list[int]):
     """Update the data to include new data since the last crawl"""
-    if station == "*":
+    if stations == ["all"]:
         update_data(ALL_RELEVANT_STATIONS, None)
     else:
-        update_data([int(station)], None)
+        stations = list(map(int, stations))
+        update_data(stations, None)
 
 @click.command()
 @click.pass_context

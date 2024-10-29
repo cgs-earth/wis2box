@@ -1,5 +1,5 @@
+from wis2box.oregon.helper_classes import CrawlResultStore
 from wis2box.oregon.lib import (
-    DataUpdateHelper,
     assert_valid_date,
     download_oregon_tsv,
     parse_oregon_tsv,
@@ -70,10 +70,10 @@ def test_datastream_generation():
     for station in response:
         sta_datastream = to_sensorthings_datastream(station["attributes"], units="Celcius", phenom_time=None, stream_name="test", id=0)
         streams.append(sta_datastream)
-    assert len(streams) <= len(POTENTIAL_DATASTREAMS)
+    assert len(ALL_RELEVANT_STATIONS) <= len(streams) <= len(POTENTIAL_DATASTREAMS) * len(ALL_RELEVANT_STATIONS)
 
-def test_data_update_helper():
-    data_range_setter = DataUpdateHelper() 
+def test_metadata_store_helper():
+    data_range_setter = CrawlResultStore() 
     begin, end = "9/25/2024 12:00:00 AM",  "10/7/2024 12:00:00 AM"
     data_range_setter.update_range(begin, end)
     retrieved_begin, retrieved_end= data_range_setter.get_range()

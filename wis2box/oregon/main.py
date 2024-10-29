@@ -25,12 +25,14 @@ from typing import Coroutine, Optional, List
 import logging
 import concurrent.futures
 import httpx
-from httpx import AsyncHTTPTransport
 import requests
 from wis2box.api import setup_collection, upsert_collection_item
-from wis2box.env import API_BACKEND_URL
+from wis2box.oregon.helper_classes import (
+    BatchHelper,
+    CrawlResultStore,
+    CrawlResultStore,
+)
 from wis2box.oregon.lib import (
-    DataUpdateHelper,
     OregonHttpClient,
     assert_valid_date,
     generate_oregon_tsv_url,
@@ -68,12 +70,12 @@ class OregonStaRequestBuilder:
     inserting oregon data into the sensorthings FROST server
     """
 
-    relevant_stations: List[int]
+    relevant_stations: list[int]
     data_start: str
     data_end: str
 
     def __init__(
-        self, relevant_stations: List[int], data_start: str, data_end: str
+        self, relevant_stations: list[int], data_start: str, data_end: str
     ) -> None:
         self.relevant_stations = relevant_stations
         self.data_start = data_start
@@ -151,14 +153,9 @@ class OregonStaRequestBuilder:
 
             try:
                 response = await session.get(tsv_url)
-            except httpx.ProtocolError as e: # TODO also check read error
-                LOGGER.error(f"Failed to fetch {tsv_url}: {e}")
-                continue
-
-            LOGGER.info(f"Fetching {tsv_url}")
-            try:
+                LOGGER.info(f"Fetching {tsv_url}")
                 tsvBytes = await response.aread()
-            except httpx.ReadError as e:
+            except (httpx.ReadError, httpx.ProtocolError)  as e:
                 LOGGER.error(f"Failed to fetch {tsv_url}: {e}")
                 continue
 
@@ -171,7 +168,7 @@ class OregonStaRequestBuilder:
 
             yield all_observations
 
-    async def send(self) -> None:
+    async def send(self, crawl_tracker: CrawlResultStore) -> None:
         """Send the data to the FROST server. This is the core public function for this class"""
         stations = self._get_upstream_data()
 
@@ -211,32 +208,15 @@ class OregonStaRequestBuilder:
                         observation_list = self._get_observations(station, http_session)
                         id: int = 0
                         async for observation_dataset in observation_list:
-                            request = {"requests": []}
-
-                            for single_observation in observation_dataset:
-                                request_encoded: FrostBatchRequest = {
-                                    "id": f"{single_observation['Datastream']['@iot.id']}{id}",
-                                    "method": "post",
-                                    "url": "Observations",
-                                    "body": single_observation,
-                                }
-
-                                request["requests"].append(request_encoded)
-
-                            LOGGER.info(
-                                f"Sending batch observations for {station['attributes']['station_name']} to FROST"
-                            )
-
-                            resp = await http_session.post(
-                                f"{API_BACKEND_URL}/$batch",
-                                json=request,
-                                headers={"Content-Type": "application/json"},
-                            )
-
+                            
+                            batchHelper = BatchHelper(http_session, observation_dataset)
+                            resp = await batchHelper.send()
                             # Proper status code to check is 201 for POST but sometimes the server returns 200 to signify success
                             if resp.status_code != 200 and resp.status_code != 201:
-                                LOGGER.error(
-                                    f"Failed to insert observation into FROST. Got {resp.status_code} with content: {resp.content} and latlong, {station['attributes']['latitude_dec']}, {station['attributes']['longitude_dec']}"
+                                crawl_tracker.set_failure(
+                                    int(station["attributes"]["station_nbr"]),
+                                    f"Failed to insert observation into FROST. Got {resp.status_code} with content: {resp.content} trying to insert {batchHelper.request}",
+                                    with_log=True
                                 )
                                 continue
 
@@ -244,8 +224,10 @@ class OregonStaRequestBuilder:
 
                     nonlocal stations_done
                     stations_done += 1
-                    LOGGER.info(
-                        f"Done with {station['attributes']['station_name']}. Finished ({stations_done}/{len(stations)})"
+                    crawl_tracker.set_success(
+                        int(station["attributes"]["station_nbr"]),
+                        f"Done with {station['attributes']['station_name']}. Finished ({stations_done}/{len(stations)})",
+                        with_log=True
                     )
 
                 upload_tasks.append(upload_observations(station))
@@ -254,7 +236,7 @@ class OregonStaRequestBuilder:
             LOGGER.info("Done uploading to FROST")
 
 
-def load_data_into_frost(station: int, begin: Optional[str], end: Optional[str]):
+def load_data_into_frost(stations: list[int], begin: Optional[str], end: Optional[str]):
     """Load a station number with an associated start and end date into FROST"""
 
     METADATA = {
@@ -272,42 +254,37 @@ def load_data_into_frost(station: int, begin: Optional[str], end: Optional[str])
     }
     setup_collection(meta=METADATA)
 
-    data_range_setter = DataUpdateHelper()
+    metadata_store = CrawlResultStore()
 
     if not begin:
         begin = START_OF_DATA
     if not end:
         end = to_oregon_datetime(datetime.now())
 
-    data_range_setter.update_range(begin, end)
-
-    if station == "*":
-        relevant_stations: list[int] = ALL_RELEVANT_STATIONS
-    else:
-        relevant_stations: list[int] = [int(station)]
+    metadata_store.update_range(begin, end)
 
     builder = OregonStaRequestBuilder(
-        relevant_stations=relevant_stations, data_start=begin, data_end=end
+        stations, data_start=begin, data_end=end
     )
 
     start_time = datetime.now()
 
     async def main():
-        await builder.send()
+        await builder.send(metadata_store)
 
     asyncio.run(main())
     end_time = datetime.now()
     duration = round((end_time - start_time).total_seconds() / 60, 3)
 
     LOGGER.info(
-        f"Data loaded into FROST for stations: {relevant_stations} after {duration} minutes"
+        f"Data loaded into FROST for stations: {stations} after {duration} minutes"
     )
 
 
 def update_data(stations: list[int], new_end: Optional[str]):
     """Update the data in FROST"""
-    update_helper = DataUpdateHelper()
-    _, end = update_helper.get_range()
+    metadata_store = CrawlResultStore()
+    _, end = metadata_store.get_range()
     # make sure the start and end are valid dates
     assert_valid_date(end)
     new_start = (
@@ -323,8 +300,8 @@ def update_data(stations: list[int], new_end: Optional[str]):
     LOGGER.info(f"Updating data from {new_start} to {new_end}")
 
     async def main():
-        await builder.send()
+        await builder.send(metadata_store)
 
     asyncio.run(main())
 
-    update_helper.update_range(new_start, new_end)
+    metadata_store.update_range(new_start, new_end)

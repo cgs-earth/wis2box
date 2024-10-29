@@ -61,6 +61,7 @@ def to_sensorthings_station(station: StationData, datastreams: list[Datastream])
 
 
 def to_sensorthings_datastream(attr: Attributes, units: str, phenom_time: Optional[str], stream_name: str, id: int) -> Datastream:
+    """Conforms to https://developers.sensorup.com/docs/#datastreams_post"""
     property = stream_name.removesuffix("_available").removesuffix("_avail")
 
     datastream: Datastream = {

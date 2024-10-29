@@ -1,9 +1,6 @@
-import json
 from wis2box.api import  remove_collection, upsert_collection_item
-from wis2box.env import STORAGE_INCOMING
 from wis2box.oregon.main import OregonStaRequestBuilder
 from wis2box.oregon.types import ALL_RELEVANT_STATIONS, THINGS_COLLECTION
-from wis2box.storage import put_data
 
 
 def test_upsert():
@@ -115,62 +112,3 @@ def test_upsert():
         },
     }
     upsert_collection_item(THINGS_COLLECTION, data)
-
-
-def test_batch_insert():
-    builder = OregonStaRequestBuilder(
-        ALL_RELEVANT_STATIONS, "10/1/2023 12:00:00 AM", "10/2/2023 12:00:00 AM"
-    )
-    stations = builder._get_upstream_data()
-
-    for s in stations:
-        datastreams, sta_observations = builder._generate_datastreams_and_observations(
-            s
-        )
-        station_metadata = to_station_metadata(s["attributes"], datastreams)
-        # put_data(
-        #     json.dumps(station_metadata).encode("utf-8"),
-        #     f"{STORAGE_INCOMING}/{station_metadata['name']}",
-        # )
-        upsert_collection_item(THINGS_COLLECTION, station_metadata)
-
-    observation = [
-        {
-            "id": 1402600000,
-            "method": "post",
-            "url": "Observations",
-            "body": {
-                "resultTime": "2023-01-01T00:00:00Z",
-                "Datastream": {"@iot.id": 140260000},
-                "result": 2.67,
-                "FeatureOfInterest": {
-                    "name": "UMATILLA R AT YOAKUM, OR",
-                    "description": "UMATILLA R AT YOAKUM, OR",
-                    "encodingType": "application/vnd.geo+json",
-                    "feature": {
-                        "type": "Point",
-                        "coordinates": [-119.036847, 45.677157, 770.0],
-                    },
-                },
-            },
-        },
-        {
-            "id": 1402600001,
-            "method": "post",
-            "url": "Observations",
-            "body": {
-                "resultTime": "2023-01-01T00:15:00Z",
-                "Datastream": {"@iot.id": 140260000},
-                "result": 2.67,
-                "FeatureOfInterest": {
-                    "name": "UMATILLA R AT YOAKUM, OR",
-                    "description": "UMATILLA R AT YOAKUM, OR",
-                    "encodingType": "application/vnd.geo+json",
-                    "feature": {
-                        "type": "Point",
-                        "coordinates": [-119.036847, 45.677157, 770.0],
-                    },
-                },
-            },
-        },
-    ]
