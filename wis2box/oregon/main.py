@@ -1,0 +1,307 @@
+###############################################################################
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+###############################################################################
+
+import asyncio
+from datetime import datetime
+from typing import Coroutine, Optional, List
+import logging
+import concurrent.futures
+import httpx
+import requests
+from wis2box.api import setup_collection, upsert_collection_item
+from wis2box.oregon.helper_classes import (
+    BatchHelper,
+    CrawlResultStore,
+    CrawlResultStore,
+)
+from wis2box.oregon.lib import (
+    OregonHttpClient,
+    assert_valid_date,
+    generate_oregon_tsv_url,
+    generate_phenomenon_time,
+    parse_oregon_tsv,
+    to_oregon_datetime,
+)
+
+from wis2box.oregon.sta_generation import (
+    to_sensorthings_datastream,
+    to_sensorthings_observation,
+    to_sensorthings_station,
+)
+
+from wis2box.oregon.types import (
+    ALL_RELEVANT_STATIONS,
+    POTENTIAL_DATASTREAMS,
+    START_OF_DATA,
+    THINGS_COLLECTION,
+    Attributes,
+    FrostBatchRequest,
+    Observation,
+    OregonHttpResponse,
+    ParsedTSVData,
+    StationData,
+    Datastream,
+)
+
+LOGGER = logging.getLogger(__name__)
+
+
+class OregonStaRequestBuilder:
+    """
+    Helper class for constructing the sensorthings API requests for
+    inserting oregon data into the sensorthings FROST server
+    """
+
+    relevant_stations: list[int]
+    data_start: str
+    data_end: str
+
+    def __init__(
+        self, relevant_stations: list[int], data_start: str, data_end: str
+    ) -> None:
+        self.relevant_stations = relevant_stations
+        self.data_start = data_start
+        self.data_end = data_end
+
+    def _get_upstream_data(self) -> list[StationData]:
+        """Get the upstream metadata from the Oregon API for all relevant stations."""
+        client = OregonHttpClient()
+
+        # Split the ALL_RELEVANT_STATIONS into two halves since the oregon api can't handle all of them at once
+        if len(self.relevant_stations) > 1:
+            half_index = len(self.relevant_stations) // 2
+            first_half_stations = self.relevant_stations[:half_index]
+            second_half_stations = self.relevant_stations[half_index:]
+
+            # Fetch and process the first half of the stations
+            first_station_set: OregonHttpResponse = client.fetch_stations(
+                first_half_stations
+            )
+            second_station_set: OregonHttpResponse = client.fetch_stations(
+                second_half_stations
+            )
+            # create one larger dictionary that merges the two
+            stations = first_station_set["features"] + second_station_set["features"]
+
+        # If there's only one station, just fetch it directly since we can't split it
+        else:
+            stations = client.fetch_stations(self.relevant_stations)["features"]
+
+        assert len(stations) == len(self.relevant_stations)
+        return stations
+
+    def _get_datastreams(
+        self,
+        station: StationData,
+    ) -> list[Datastream]:
+        """Given a station, return the datastreams associated with it."""
+        attr = station["attributes"]
+
+        datastreams: list[Datastream] = []
+        for id, stream in enumerate(POTENTIAL_DATASTREAMS):
+            no_stream_available = str(attr[stream]) != "1" or stream not in attr
+            if no_stream_available:
+                continue
+
+            dummy_start = to_oregon_datetime(datetime.now())
+            dummy_end = to_oregon_datetime(datetime.now())
+            tsv_url = generate_oregon_tsv_url(
+                stream, int(attr["station_nbr"]), dummy_start, dummy_end
+            )
+            response = requests.get(tsv_url)
+            tsvParse: ParsedTSVData = parse_oregon_tsv(response.content)
+            phenom_time = generate_phenomenon_time(tsvParse.dates)
+            datastreams.append(
+                to_sensorthings_datastream(
+                    attr, tsvParse.units, phenom_time, stream, id
+                )
+            )
+
+        LOGGER.info(f"Found {len(datastreams)} datastreams for {attr['station_name']}")
+
+        return datastreams
+
+    async def _get_observations(self, station: StationData, session: httpx.AsyncClient):
+        assert isinstance(station, dict)
+        for id, datastream in enumerate(POTENTIAL_DATASTREAMS):
+            attr: Attributes = station["attributes"]
+
+            if str(attr[datastream]) != "1" or datastream not in attr:
+                continue
+
+            tsv_url = generate_oregon_tsv_url(
+                datastream, int(attr["station_nbr"]), self.data_start, self.data_end
+            )
+
+            try:
+                response = await session.get(tsv_url)
+                LOGGER.info(f"Fetching {tsv_url}")
+                tsvBytes = await response.aread()
+            except (httpx.ReadError, httpx.ProtocolError)  as e:
+                LOGGER.error(f"Failed to fetch {tsv_url}: {e}")
+                continue
+
+            tsvParse: ParsedTSVData = parse_oregon_tsv(tsvBytes)
+
+            all_observations: list[Observation] = [
+                to_sensorthings_observation(attr, datapoint, date, date, id)
+                for datapoint, date in zip(tsvParse.data, tsvParse.dates)
+            ]
+
+            yield all_observations
+
+    async def send(self, crawl_tracker: CrawlResultStore) -> None:
+        """Send the data to the FROST server. This is the core public function for this class"""
+        stations = self._get_upstream_data()
+
+        # First put the metadata about each station into wis2box without the observations
+        # We use a threadpool since upsert isn't async
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = {}
+            for station in stations:
+                # Store the future with the station as key
+                future = executor.submit(self._get_datastreams, station)
+                futures[future] = station  # Mapping future to the corresponding station
+
+            for future in concurrent.futures.as_completed(futures):
+                datastreams: list[Datastream] = future.result()
+                station = futures[
+                    future
+                ]  # Retrieve the station associated with the future
+                LOGGER.info(
+                    f"Upserting metadata for station {station['attributes']['station_nbr']}"
+                )
+                sta_station = to_sensorthings_station(station, datastreams)
+                upsert_collection_item(THINGS_COLLECTION, sta_station)
+
+        stations_done = 0
+
+        # Next, async load the associated observations into FROST
+        async with httpx.AsyncClient(
+            timeout=None,
+            transport=httpx.AsyncHTTPTransport(retries=3)
+        ) as http_session:  # no timeout since the load can take a long time on a VM
+            upload_tasks: list[Coroutine] = []
+            semaphore = asyncio.Semaphore(10) # this is needed since if you send too many requests to Oregon at once, it will close the session for some reason and you'll get an error
+            for station in stations:
+
+                async def upload_observations(station: StationData) -> None:
+                    async with semaphore:
+                        observation_list = self._get_observations(station, http_session)
+                        id: int = 0
+                        async for observation_dataset in observation_list:
+                            
+                            batchHelper = BatchHelper(http_session, observation_dataset)
+                            resp = await batchHelper.send()
+                            # Proper status code to check is 201 for POST but sometimes the server returns 200 to signify success
+                            if resp.status_code != 200 and resp.status_code != 201:
+                                crawl_tracker.set_failure(
+                                    int(station["attributes"]["station_nbr"]),
+                                    f"Failed to insert observation into FROST. Got {resp.status_code} with content: {resp.content} trying to insert {batchHelper.request}",
+                                    with_log=True
+                                )
+                                continue
+
+                            id += 1
+
+                    nonlocal stations_done
+                    stations_done += 1
+                    crawl_tracker.set_success(
+                        int(station["attributes"]["station_nbr"]),
+                        f"Done with {station['attributes']['station_name']}. Finished ({stations_done}/{len(stations)})",
+                        with_log=True
+                    )
+
+                upload_tasks.append(upload_observations(station))
+
+            await asyncio.gather(*upload_tasks)
+            LOGGER.info("Done uploading to FROST")
+
+
+def load_data_into_frost(stations: list[int], begin: Optional[str], end: Optional[str]):
+    """Load a station number with an associated start and end date into FROST"""
+
+    METADATA = {
+        "id": THINGS_COLLECTION,
+        "title": THINGS_COLLECTION,
+        "description": "Oregon Water Resource SensorThings",
+        "keywords": ["thing", "oregon"],
+        "links": [
+            "https://gis.wrd.state.or.us/server/rest/services",
+            "https://gis.wrd.state.or.us/server/sdk/rest/index.html#/02ss00000029000000",
+        ],
+        "bbox": [-180, -90, 180, 90],
+        "id_field": "@iot.id",
+        "title_field": "name",
+    }
+    setup_collection(meta=METADATA)
+
+    metadata_store = CrawlResultStore()
+
+    if not begin:
+        begin = START_OF_DATA
+    if not end:
+        end = to_oregon_datetime(datetime.now())
+
+    metadata_store.update_range(begin, end)
+
+    builder = OregonStaRequestBuilder(
+        stations, data_start=begin, data_end=end
+    )
+
+    start_time = datetime.now()
+
+    async def main():
+        await builder.send(metadata_store)
+
+    asyncio.run(main())
+    end_time = datetime.now()
+    duration = round((end_time - start_time).total_seconds() / 60, 3)
+
+    LOGGER.info(
+        f"Data loaded into FROST for stations: {stations} after {duration} minutes"
+    )
+
+
+def update_data(stations: list[int], new_end: Optional[str]):
+    """Update the data in FROST"""
+    metadata_store = CrawlResultStore()
+    _, end = metadata_store.get_range()
+    # make sure the start and end are valid dates
+    assert_valid_date(end)
+    new_start = (
+        end  # new start should be set to the previous end in order to only get new data
+    )
+
+    if not new_end:
+        new_end = to_oregon_datetime(datetime.now())
+
+    builder = OregonStaRequestBuilder(
+        relevant_stations=stations, data_start=new_start, data_end=new_end
+    )
+    LOGGER.info(f"Updating data from {new_start} to {new_end}")
+
+    async def main():
+        await builder.send(metadata_store)
+
+    asyncio.run(main())
+
+    metadata_store.update_range(new_start, new_end)

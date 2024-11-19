@@ -1,0 +1,4 @@
+# Place at /etc/caddy/Caddyfile and run with sudo caddy run --config /etc/caddy/Caddyfile
+owdp-pilot.internetofwater.app {
+	reverse_proxy :8999
+}

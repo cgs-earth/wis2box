@@ -23,7 +23,6 @@ import logging
 
 LOGGER = logging.getLogger(__name__)
 
-
 class BaseBackend:
     """Abstract API backend"""
     def __init__(self, defs: dict) -> None:

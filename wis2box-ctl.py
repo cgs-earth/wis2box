@@ -156,7 +156,7 @@ def make(args) -> None:
             run(args, split(f"docker compose {DOCKER_COMPOSE_ARGS} start {containers}"))
         else:
             if args.command == 'start-dev':
-                run(args, split(f'docker compose {DOCKER_COMPOSE_ARGS} --file docker/docker compose.dev.yml up'))
+                run(args, split(f'docker compose {DOCKER_COMPOSE_ARGS} --file docker/docker-compose.dev.yml up'))
             else:
                 run(args, split(f'docker compose {DOCKER_COMPOSE_ARGS} up -d'))
     elif args.command == "execute":
@@ -170,7 +170,7 @@ def make(args) -> None:
             f'docker compose {DOCKER_COMPOSE_ARGS} logs --follow {containers}'))
     elif args.command in ["stop", "down"]:
         if containers:
-            run(args, split(f"docker compose {DOCKER_COMPOSE_ARGS} {containers}"))
+            run(args, split(f"docker compose {DOCKER_COMPOSE_ARGS} down {containers}"))
         else:
             run(args, split(
                 f'docker compose {DOCKER_COMPOSE_ARGS} down --remove-orphans {containers}'))
