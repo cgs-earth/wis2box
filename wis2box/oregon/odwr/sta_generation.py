@@ -1,5 +1,5 @@
 from typing import Optional
-from wis2box.oregon.types import Attributes, Datastream, Observation, StationData
+from wis2box.oregon.odwr.types import Attributes, Datastream, Observation, StationData
 
 def to_sensorthings_observation(
     attr: Attributes, datapoint: Optional[float], resultTime: str, phenom_time: str, id: int

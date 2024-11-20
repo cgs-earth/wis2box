@@ -27,12 +27,12 @@ import concurrent.futures
 import httpx
 import requests
 from wis2box.api import setup_collection, upsert_collection_item
-from wis2box.oregon.helper_classes import (
+from wis2box.oregon.odwr.helper_classes import (
     BatchHelper,
     CrawlResultStore,
     CrawlResultStore,
 )
-from wis2box.oregon.lib import (
+from wis2box.oregon.odwr.lib import (
     OregonHttpClient,
     assert_valid_date,
     generate_oregon_tsv_url,
@@ -41,13 +41,13 @@ from wis2box.oregon.lib import (
     to_oregon_datetime,
 )
 
-from wis2box.oregon.sta_generation import (
+from wis2box.oregon.odwr.sta_generation import (
     to_sensorthings_datastream,
     to_sensorthings_observation,
     to_sensorthings_station,
 )
 
-from wis2box.oregon.types import (
+from wis2box.oregon.odwr.types import (
     ALL_RELEVANT_STATIONS,
     POTENTIAL_DATASTREAMS,
     START_OF_DATA,

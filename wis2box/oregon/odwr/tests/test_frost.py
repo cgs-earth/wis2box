@@ -1,6 +1,6 @@
 from wis2box.api import  remove_collection, upsert_collection_item
-from wis2box.oregon.main import OregonStaRequestBuilder
-from wis2box.oregon.types import ALL_RELEVANT_STATIONS, THINGS_COLLECTION
+from wis2box.oregon.odwr.main import OregonStaRequestBuilder
+from wis2box.oregon.odwr.types import ALL_RELEVANT_STATIONS, THINGS_COLLECTION
 
 
 def test_upsert():

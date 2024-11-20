@@ -7,8 +7,8 @@ from typing import ClassVar, List, Literal, Optional, Tuple
 
 import httpx
 from wis2box.env import API_BACKEND_URL
-from wis2box.oregon.lib import assert_valid_date
-from wis2box.oregon.types import FrostBatchRequest, Observation
+from wis2box.oregon.odwr.lib import assert_valid_date
+from wis2box.oregon.odwr.types import FrostBatchRequest, Observation
 
 LOGGER = logging.getLogger(__name__)
 
