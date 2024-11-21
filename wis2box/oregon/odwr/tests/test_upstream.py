@@ -1,10 +1,10 @@
 from datetime import datetime
 
-from wis2box.oregon.lib import download_oregon_tsv, generate_oregon_tsv_url, parse_oregon_tsv, to_oregon_datetime
+from wis2box.oregon.odwr.lib import download_oregon_tsv, generate_oregon_tsv_url, parse_oregon_tsv, to_oregon_datetime
 import pytest
 from collections import Counter
 import requests
-from wis2box.oregon.types import START_OF_DATA
+from wis2box.oregon.odwr.types import START_OF_DATA
 
 @pytest.mark.parametrize("end_date", ["10/7/2022 12:00:00 AM", "10/7/2024 12:00:00 AM", "4/7/2000 11:00:00 AM"])
 def test_no_data_with_no_beginning_date(end_date):

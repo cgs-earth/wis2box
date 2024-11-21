@@ -6,8 +6,8 @@ from requests import Session
 from urllib.parse import urlencode
 from typing import List, Optional 
 
-from wis2box.oregon.cache import ShelveCache
-from wis2box.oregon.types import (
+from wis2box.oregon.odwr.cache import ShelveCache
+from wis2box.oregon.odwr.types import (
     POTENTIAL_DATASTREAMS,
     OregonHttpResponse,
     ParsedTSVData,

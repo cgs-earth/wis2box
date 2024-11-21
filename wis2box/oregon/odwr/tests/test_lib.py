@@ -1,15 +1,15 @@
-from wis2box.oregon.helper_classes import CrawlResultStore
-from wis2box.oregon.lib import (
+from wis2box.oregon.odwr.helper_classes import CrawlResultStore
+from wis2box.oregon.odwr.lib import (
     assert_valid_date,
     download_oregon_tsv,
     parse_oregon_tsv,
     from_oregon_datetime,
 )
-from wis2box.oregon.sta_generation import to_sensorthings_datastream
+from wis2box.oregon.odwr.sta_generation import to_sensorthings_datastream
 import datetime
 import pytest
-from wis2box.oregon.main import OregonStaRequestBuilder
-from wis2box.oregon.types import ALL_RELEVANT_STATIONS, POTENTIAL_DATASTREAMS, StationData
+from wis2box.oregon.odwr.main import OregonStaRequestBuilder
+from wis2box.oregon.odwr.types import ALL_RELEVANT_STATIONS, POTENTIAL_DATASTREAMS, StationData
 
 def test_download():
     response: bytes = download_oregon_tsv(

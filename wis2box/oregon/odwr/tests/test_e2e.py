@@ -4,12 +4,12 @@ import os
 
 import httpx
 from wis2box.api import remove_collection
-from wis2box.oregon.helper_classes import CrawlResultStore
-from wis2box.oregon.lib import to_oregon_datetime
-from wis2box.oregon.main import THINGS_COLLECTION, OregonStaRequestBuilder, load_data_into_frost, update_data
+from wis2box.oregon.odwr.helper_classes import CrawlResultStore
+from wis2box.oregon.odwr.lib import to_oregon_datetime
+from wis2box.oregon.odwr.main import THINGS_COLLECTION, OregonStaRequestBuilder, load_data_into_frost, update_data
 import requests
 import logging
-from wis2box.oregon.types import ALL_RELEVANT_STATIONS
+from wis2box.oregon.odwr.types import ALL_RELEVANT_STATIONS
 
 LOGGER = logging.getLogger(__name__)
 
@@ -17,7 +17,8 @@ LOGGER = logging.getLogger(__name__)
 def test_deletion():
     remove_collection(THINGS_COLLECTION)
     api_url= os.environ.get('WIS2BOX_DOCKER_API_URL')
-    assert requests.get(f"{api_url}/collections/{THINGS_COLLECTION.lower()}/items?f=json").json()["numberReturned"] == 0
+    url = f"{api_url}/collections/{THINGS_COLLECTION.lower()}/items?f=json"
+    assert requests.get(url).json()["numberReturned"] == 0
 
 def test_load_one_station_fully():
     """Try loading in https://apps.wrd.state.or.us/apps/sw/hydro_near_real_time/display_hydro_graph.aspx?station_nbr=10378500"""
