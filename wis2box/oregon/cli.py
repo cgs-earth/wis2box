@@ -24,7 +24,7 @@ __version__ = '0.6.dev1'
 import click
 
 from wis2box.oregon.odwr.cli import odwr
-from wis2box.oregon.csv.cli import csv
+from wis2box.oregon.xlsx.cli import xlsx
 
 
 @click.group()
@@ -35,5 +35,5 @@ def oregon():
 
 
 oregon.add_command(odwr)
-oregon.add_command(csv)
+oregon.add_command(xlsx)
 
