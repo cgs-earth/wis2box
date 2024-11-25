@@ -78,6 +78,8 @@ class OregonXLSX:
 
             location = fsc.Location(
                 name=site["Site Name"],
+                encoding_type="application/json",
+                description=site["Site Name"],
                 location=point,
                 properties={
                     "Operating/Monitoring/Sampling Organization": site["Operating/Monitoring/Sampling Organization"],
@@ -90,7 +92,7 @@ class OregonXLSX:
                 }
             )
             # Need to create a dummy thing only for associating the location
-            thing = fsc.Thing(name=site["Native ID"])
+            thing = fsc.Thing(name=site["Native ID"], description=site["Site Name"])
             thing.locations = [location]
             things[site["Native ID"]] = thing
         
@@ -113,6 +115,7 @@ class OregonXLSX:
 
             datastream = fsc.Datastream(
                 name=metadata["Observed Property Name"],
+                description=metadata["Observed Property Name"],
                 # Use the metadata identifier to get the associated observations
                 observation_type=metadata["Value Type"],
                 unit_of_measurement=fsc.UnitOfMeasurement(name=metadata["Units Name"], definition=metadata["Units URI"]),
@@ -120,6 +123,13 @@ class OregonXLSX:
                 observed_property= fsc.ObservedProperty(
                     name=metadata["Observed Property Name"],
                     definition=metadata["Observed Property URI"],
+                    description=metadata["Observed Property Name"]
+                ),
+                sensor=fsc.Sensor(
+                    name="Unknown",
+                    description="Unknown",
+                    encoding_type="Unknown",
+                    metadata=''
                 ),
                 properties={
                     "Accuracy Bounds": metadata["Accuracy Bounds"],
@@ -128,7 +138,7 @@ class OregonXLSX:
                     "Analytical Method Name": metadata["Analytical Method Name"],
                     "Analytical Method URI": metadata["Analytical Method URI"],
                     "Sampling Method Name": metadata["Sampling Method Name"],
-                    "Sample Fraction": metadata["Sample Fraction"],
+                    "Sample Fraction": str(metadata["Sample Fraction"]),
                     "Value Type": metadata["Value Type"],
                 }
             )
@@ -145,11 +155,17 @@ class OregonXLSX:
             associatedDatastream = datastreams[data["Associated Metadata Identifier"]]
 
             obs = fsc.Observation(
-                result_time=data["Result Timestamp"],
-                phenomenon_time=data["Sample Timestamp"],
-                datastream=associatedDatastream,
+                # need to add Z to make it a valid ISO format
+                result_time=f"{data['Result Timestamp']}Z",
+                phenomenon_time=f"{data['Sample Timestamp']}Z",
                 result=data["Data Value"],
                 result_quality=data["Data Quality"],
+                feature_of_interest=fsc.FeatureOfInterest(
+                    name= str(associatedDatastream.name),
+                    description= str(associatedDatastream.description),
+                    encoding_type="application/json",
+                    feature=str(associatedDatastream.name)
+                )
             )
 
             if not associatedDatastream.observations:
