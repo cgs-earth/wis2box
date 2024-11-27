@@ -11,4 +11,4 @@
 CONTAINER_NAME="wis2box"
 
 # Run the echo command inside the container
-docker exec -it "$CONTAINER_NAME" wis2box oregon update
+docker exec -it "$CONTAINER_NAME" wis2box oregon odwr update
