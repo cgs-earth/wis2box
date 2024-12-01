@@ -33,7 +33,7 @@ def load(ctx, verbosity, stations: list[int] , begin: Optional[str] , end: Optio
 @click.command()
 @click.pass_context
 @cli_helpers.OPTION_VERBOSITY
-@click.option("--stations", "-s", default=["all"], help="station identifier", callback=lambda _,__,x: x.split(',') if x else [])
+@click.option("--stations", "-s", default="all", help="station identifier", callback=lambda _,__,x: x.split(',') if x else [])
 def update(ctx, verbosity, stations: list[int]):
     """Update the data to include new data since the last crawl"""
     if stations == ["all"]:

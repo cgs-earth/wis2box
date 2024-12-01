@@ -2,8 +2,9 @@
 from dataclasses import asdict, dataclass
 import json
 import logging
+import os
 from pathlib import Path
-from typing import ClassVar, List, Literal, Optional, Tuple
+from typing import Literal, Tuple
 
 import httpx
 from wis2box.env import API_BACKEND_URL
@@ -12,34 +13,37 @@ from wis2box.oregon.odwr.types import FrostBatchRequest, Observation
 
 LOGGER = logging.getLogger(__name__)
 
+metadata_file_path = Path.home() / "oregon_load_metadata.json"
+
 @dataclass
 class UpdateMetadata():
-    """Contains the metadata about a specific crawl"""
+    """Contains the metadata about a specific crawl and how much should be downloaded
+    in future updates"""
     data_start: str
     data_end: str
     failures: list[dict[int, str]]
     successes: list[dict[int, str]]
 
 def load_metadata() -> UpdateMetadata:
-    with open("oregon_load_metadata.json", "r") as f:
+    # save to the home directory for easier observability
+    with open(metadata_file_path, "r") as f:
         metadata = json.load(f)
     return UpdateMetadata(**metadata)
 
 def save_metadata(metadata: UpdateMetadata):
-    with open("oregon_load_metadata.json", "w") as f:
+    # save to the home directory for easier observability
+    with open(metadata_file_path, "w") as f:
         json.dump(asdict(metadata), f)
+    os.chmod(metadata_file_path, 0o644)  # Read/write for owner, read-only for others
 
 class CrawlResultStore:
     """Helper class to determine what to download based on a local metadata file"""
 
-    metadata_file: ClassVar[str] = "oregon_load_metadata.json"  # noqa: F821
 
     def __init__(self):
         # check if metadata.json exists if not create it
-        metadata_file_path = Path(self.metadata_file)
         if not metadata_file_path.exists():
             save_metadata(UpdateMetadata("", "", [], []))
-            CrawlResultStore.metadata_file = str(metadata_file_path)
         else: # if it exists, make sure the successes and failures are not left over from the previous crawl
             metadata = load_metadata()
             metadata.successes, metadata.failures = [], []

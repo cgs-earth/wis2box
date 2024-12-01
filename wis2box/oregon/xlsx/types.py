@@ -186,5 +186,6 @@ class OregonXLSX:
         if not service:
             raise Exception("Can't connect to FROST API backend")
         
+
         for thing in things:
             service.create(thing)
