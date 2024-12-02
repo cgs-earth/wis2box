@@ -8,3 +8,6 @@ PyYAML
 requests
 pytest
 debugpy
+pandas
+openpyxl
+frost-sta-client
