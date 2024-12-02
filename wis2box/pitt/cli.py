@@ -23,30 +23,14 @@ __version__ = '0.6.dev1'
 
 import click
 
-from wis2box.api import api
-from wis2box.data import data
-from wis2box.env import environment
-from wis2box.metadata import metadata
-from wis2box.pubsub import pubsub
-from wis2box.auth import auth
-from wis2box.oregon.cli import oregon 
-from wis2box.pitt.cli import oregon 
-
 
 
 @click.group()
 @click.version_option(version=__version__)
-def cli():
-    """WIS 2.0 in a box"""
+def pitt():
+    """Oregon data management"""
     pass
 
 
-cli.add_command(api)
-cli.add_command(environment)
-cli.add_command(data)
-cli.add_command(metadata)
-cli.add_command(auth)
-cli.add_command(pubsub)
-cli.add_command(oregon)
-cli.add_command(pitt)
+pitt.add_command(load)
 
