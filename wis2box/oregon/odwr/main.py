@@ -48,12 +48,10 @@ from wis2box.oregon.odwr.sta_generation import (
 )
 
 from wis2box.oregon.odwr.types import (
-    ALL_RELEVANT_STATIONS,
     POTENTIAL_DATASTREAMS,
     START_OF_DATA,
     THINGS_COLLECTION,
     Attributes,
-    FrostBatchRequest,
     Observation,
     OregonHttpResponse,
     ParsedTSVData,
@@ -222,7 +220,7 @@ class OregonStaRequestBuilder:
 
                             id += 1
 
-                    nonlocal stations_done
+                    nonlocal stations_done # Easier state tracking 
                     stations_done += 1
                     crawl_tracker.set_success(
                         int(station["attributes"]["station_nbr"]),

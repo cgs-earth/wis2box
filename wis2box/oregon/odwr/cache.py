@@ -11,6 +11,10 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ShelveCache:
+    """
+    Helper cache for storing and fetching data from the oregon API. 
+    Not used in production, moreso to make testing less intensive on upstream
+    """
     db: ClassVar[str] = "oregondb"
 
     def set(self, url: str, json_data: dict, _ttl: Optional[timedelta] = None):

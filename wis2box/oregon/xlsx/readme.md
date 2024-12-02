@@ -1,1 +1,1 @@
-This directory represents all code related to ingesting a CSV file into the Oregon WIS2Box deployment.
+This directory represents all code related to ingesting a XLSX file into the Oregon WIS2Box deployment.

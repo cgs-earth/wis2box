@@ -20,7 +20,7 @@ def test(ctx, verbosity, pytest_args):
 @cli_helpers.OPTION_VERBOSITY
 @click.argument('pytest_args', nargs=-1, type=click.UNPROCESSED)
 def test_debug(ctx, verbosity, pytest_args):
-    """Run tests with debugpy for debugging."""
+    """Run tests with debugpy for debugging. Requires an external debugger to connect to the port"""
     debugpy.listen(("0.0.0.0", 5678))
     print("Waiting for debugger attach... If you are using vscode, use the Attach Debugger configuration in this repo")
     debugpy.wait_for_client()

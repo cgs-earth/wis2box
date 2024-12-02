@@ -13,7 +13,7 @@ from wis2box.oregon.odwr.types import FrostBatchRequest, Observation
 
 LOGGER = logging.getLogger(__name__)
 
-metadata_file_path = Path.home() / "oregon_load_metadata.json"
+metadata_file_path = Path("oregon_load_metadata.json")
 
 @dataclass
 class UpdateMetadata():

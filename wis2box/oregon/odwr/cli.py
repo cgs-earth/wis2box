@@ -3,7 +3,7 @@ from typing import Optional
 
 import click
 import pytest
-
+import debugpy
 from wis2box import cli_helpers
 from wis2box.api import remove_collection, setup_collection
 from wis2box.oregon.odwr.main import load_data_into_frost, update_data
@@ -70,6 +70,22 @@ def test(ctx, verbosity, pytest_args):
     pytest.main([test_dir, "-vvvx", *pytest_args])
 
 
+
+@click.command(context_settings=dict(ignore_unknown_options=True))
+@click.pass_context
+@cli_helpers.OPTION_VERBOSITY
+@click.argument('pytest_args', nargs=-1, type=click.UNPROCESSED)
+def test_debug(ctx, verbosity, pytest_args):
+    """Run tests with debugpy for debugging. Requires an external debugger to connect to the port"""
+    debugpy.listen(("0.0.0.0", 5678))
+    print("Waiting for debugger attach... If you are using vscode, use the Attach Debugger configuration in this repo")
+    debugpy.wait_for_client()
+    print("Debugger attached.")
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    test_dir = os.path.join(dir_path, "tests")
+    pytest.main([test_dir, "-vvvx", *pytest_args])
+
+
 @click.group()
 def odwr():
     """Station metadata management for Oregon Water Resources"""
@@ -80,3 +96,4 @@ odwr.add_command(load)
 odwr.add_command(delete)
 odwr.add_command(update)
 odwr.add_command(test)
+odwr.add_command(test_debug)

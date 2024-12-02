@@ -8,6 +8,7 @@ def read_sheet(sheet: pd.DataFrame) -> list:
 
 
 def validate_columns(sheet: list, typedDict: type):
+    """Make sure that the sheet has the same columns as the typedDict"""
     expectedCols = list(typedDict.__annotations__.keys())
     gotCols = list(sheet[0].keys())
     # take the set difference
