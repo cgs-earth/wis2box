@@ -46,3 +46,5 @@ docker/.env
 .venv/
 frost_batch_request*.json
 oregon_metadata.json
+
+rs_chla_predictions.csv
