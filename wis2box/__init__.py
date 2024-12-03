@@ -30,7 +30,7 @@ from wis2box.metadata import metadata
 from wis2box.pubsub import pubsub
 from wis2box.auth import auth
 from wis2box.oregon.cli import oregon 
-from wis2box.pitt.cli import oregon 
+from wis2box.pitt.cli import pitt 
 
 
 

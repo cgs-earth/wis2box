@@ -1,8 +1,4 @@
-import os
-from typing import TypedDict, Union
-from dataclasses import dataclass
-import frost_sta_client as fsc
-import geojson
+from typing import TypedDict
 
 class PredictionsCSV(TypedDict):
     COMID: str
