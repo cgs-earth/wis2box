@@ -59,6 +59,8 @@ def test_debug(ctx, verbosity, pytest_args):
     test_dir = os.path.join(dir_path, "tests")
     pytest.main([test_dir, "-vvvx", *pytest_args])
 
+def delete():
+    pass
 
 
 pitt.add_command(test)
