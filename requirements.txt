@@ -9,5 +9,5 @@ requests
 pytest
 debugpy
 pandas
-openpyxl
-frost-sta-client
+frost-sta-client # used for ETL and data validation before sending into FROST
+geojson 
