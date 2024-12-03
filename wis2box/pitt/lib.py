@@ -64,6 +64,10 @@ def to_sta(
     observations: Generator[PredictionsCSV, None, None],
 ) -> list[fsc.Thing]:
     observationMapping: dict[str, list[fsc.Observation]] = {}
+    # map the COMID to the datastream
+    datastreamMapping: dict[str, fsc.Datastream] = {}
+
+    observations = list(observations)
 
     for obs in observations:
         fscObservation = fsc.Observation(
@@ -85,13 +89,16 @@ def to_sta(
         else:
             observationMapping[obs["COMID"]] = [fscObservation]
 
-    # map the COMID to the datastream
-    datastreamMapping: dict[str, fsc.Datastream] = {}
+
 
     for obs in observations:
         # If it is already a datastream, skip it
         if obs["COMID"] in datastreamMapping.keys():
             continue
+        elif obs["COMID"] is None:
+            continue
+
+        associatedObservation = observationMapping[obs["COMID"]]
 
         datastream = fsc.Datastream(
             name=f"Chlorophyll a prediction at COMID {obs['COMID']}",
@@ -108,14 +115,14 @@ def to_sta(
                 definition="Chlorophyll a prediction",
             ),
             observation_type="Chlorophyll a prediction",
-            observed_area=geometry["COMID"],
+            observed_area=geometry[obs["COMID"]],
             sensor=fsc.Sensor(
                 name="Chlorophyll a prediction based on Landsat",
                 description="Chlorophyll a prediction based on Landsat",
                 encoding_type="Unknown",
                 metadata="Unknown",
             ),
-            observations=observationMapping[obs["COMID"]],
+            observations=associatedObservation,
             properties={},
         )
         datastreamMapping[obs["COMID"]] = datastream
