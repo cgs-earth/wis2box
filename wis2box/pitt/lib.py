@@ -3,6 +3,7 @@ from typing import Generator, TypeVar, Type, Union
 import geojson.utils
 import pandas as pd
 import geojson
+from wis2box.data import observation
 from  wis2box.pitt.types import InsituCSV, PredictionsCSV
 import frost_sta_client as fsc
 
@@ -41,7 +42,7 @@ def parse_geojson(input_file: Path) -> list[geojson.Feature]:
         features = get_list_of_features(fc)
         return features
 
-def to_sta(geometry: list[geojson.Feature], observations: list[PredictionsCSV], datastreams: list[InsituCSV]) -> list[fsc.Thing]:
+def to_sta(geometry: list[geojson.Feature], observations: list[PredictionsCSV]) -> list[fsc.Thing]:
 
     # map the COMID to the thing
     things: dict[str, fsc.Thing] = {}
@@ -61,6 +62,25 @@ def to_sta(geometry: list[geojson.Feature], observations: list[PredictionsCSV], 
         thing.locations = [location]
         things[site["properties"]["COMID"]] = thing
 
-    # map the COMID to the datastream
-    datastreams: dict[str, fsc.Datastream] = {}
 
+        datastream = fsc.Datastream(
+            name=f"Chlorophyll a prediction at COMID {observation['COMID']}",
+            description=f"Chlorophyll a prediction at COMID {observation['COMID']}",
+            observed_property= fsc.ObservedProperty(
+                name="Chlorophyll a prediction",
+                definition="Chlorophyll a prediction",
+                description="Chlorophyll a prediction",
+            ),
+            sensor=fsc.Sensor(
+                name="Chlorophyll a prediction based on Landsat",
+                description="Chlorophyll a prediction based on Landsat",
+                encoding_type="Unknown",
+                metadata=''
+            )
+        )
+
+        thing.datastreams = [datastream]
+        
+
+        obs = fsc.Observation(
+            result_time=observation["resultTime"],
