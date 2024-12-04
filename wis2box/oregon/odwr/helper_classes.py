@@ -116,4 +116,3 @@ class BatchHelper():
             json=self.request,
             headers={"Content-Type": "application/json"},
         )
-

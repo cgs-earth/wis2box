@@ -27,6 +27,8 @@ from wis2box import cli_helpers
 import os
 import pytest
 
+from wis2box.api import remove_collection
+
 
 @click.group()
 @click.version_option(version=__version__)
@@ -59,10 +61,16 @@ def test_debug(ctx, verbosity, pytest_args):
     test_dir = os.path.join(dir_path, "tests")
     pytest.main([test_dir, "-vvvx", *pytest_args])
 
-def delete():
-    pass
+@click.command()
+@click.pass_context
+@cli_helpers.OPTION_VERBOSITY
+def delete(ctx, verbosity):
+    """Delete all pitt observations"""
+    remove_collection("Things")
 
 
+
+pitt.add_command(delete)
 pitt.add_command(test)
 pitt.add_command(test_debug)
 

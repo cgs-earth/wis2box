@@ -1,15 +1,19 @@
 import json
 import os
 from pathlib import Path
+import re
 from typing import Generator, TypeVar, Type, Union
 from attr import assoc
 import geojson.utils
 import pandas as pd
 import geojson
+import requests
 from wis2box import data
 from wis2box.pitt.types import InsituCSV, PredictionsCSV
 import frost_sta_client as fsc
 import logging
+from frost_sta_client import utils 
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -51,6 +55,13 @@ def get_list_of_features(fc: dict) -> dict[str, geojson.Feature]:
         features[f["properties"]["COMID"]] = feature
     return features
 
+def get_first_point_from_feature(feature: geojson.Feature) -> geojson.Point:
+    geometry = feature["geometry"]
+    assert geometry["type"] == "LineString"
+    coords = geometry["coordinates"][0]
+    point = geojson.Point((coords[0], coords[1], 0))
+    assert point.is_valid
+    return point
 
 def parse_geojson(input_file: Path) -> dict[str, geojson.Feature]:
     with open(input_file, "r") as f:
@@ -67,7 +78,7 @@ def to_sta(
     # map the COMID to the datastream
     datastreamMapping: dict[str, fsc.Datastream] = {}
 
-    observations = list(observations)
+    observations = list(observations) # just using a list right now to make the code more readable, will optimize generator later
 
     for obs in observations:
         fscObservation = fsc.Observation(
@@ -76,7 +87,8 @@ def to_sta(
                 name=str(obs["COMID"]),
                 description=str(obs["COMID"]),
                 encoding_type="application/json",
-                feature="Chlorophyll a prediction",
+                # feature=geometry[obs["COMID"]], # associate the full geometry with the feature
+                feature="Chlorophyll a prediction at COMID " + str(obs["COMID"]),
             ),
             result=obs["pred"],
             phenomenon_time=f"{obs['date']} 00:00:00Z",
@@ -110,12 +122,12 @@ def to_sta(
             ),
             # required
             unit_of_measurement=fsc.UnitOfMeasurement(
-                name="Chlorophyll a prediction",
-                symbol="Chlorophyll a prediction",
-                definition="Chlorophyll a prediction",
+                name="micrograms per liter",
+                symbol="µg/L",
+                definition="micrograms per liter",
             ),
             observation_type="Chlorophyll a prediction",
-            observed_area=geometry[obs["COMID"]],
+            observed_area=get_first_point_from_feature(geometry[obs["COMID"]]), # for the time being we can only display the first point since the map doesnt support line strings
             sensor=fsc.Sensor(
                 name="Chlorophyll a prediction based on Landsat",
                 description="Chlorophyll a prediction based on Landsat",
@@ -135,14 +147,14 @@ def to_sta(
         if not associatedDatastream:
             continue
         thingsMapping[comid] = fsc.Thing(
-            name=f"{comid}",
+            name=f"COMID {comid}",
             description=f"COMID {comid}",
             locations=[
                 fsc.Location(
                     name=f"COMID {comid}",
                     encoding_type="application/json",
                     description=f"COMID {comid}",
-                    location=geo,
+                    location=get_first_point_from_feature(geo),
                     properties={},
                 )
             ],
@@ -152,7 +164,7 @@ def to_sta(
     return list(thingsMapping.values())
 
 
-def send_to_frost(things: list[fsc.Thing]):
+def send_to_frost(things: list[fsc.Thing], postAsBatch=False):
     frost_url = os.getenv("WIS2BOX_API_BACKEND_URL")
     if not frost_url:
         raise Exception(
@@ -163,13 +175,28 @@ def send_to_frost(things: list[fsc.Thing]):
     if not service:
         raise Exception("Can't connect to FROST API backend")
 
-    for thing in things:
-        if not thing.datastreams:
-            LOGGER.warning(f"Thing {thing.name} has no datastreams. Skipping...")
-            continue
+    if postAsBatch:
+        batch = []
+        for thing in things:
+            jsonVersion = utils.transform_entity_to_json_dict(thing)
+            batch.append(
+                {
+                    "id": thing.name,
+                    "method": "post",
+                    "url": "Things",
+                    "body": jsonVersion,
+                }
+            )
 
-        service.create(thing)
+        payload = json.dumps({"requests": batch})
 
+        resp = requests.post(f"{frost_url}/$batch", json=payload, headers={"Content-Type": "application/json"})
+
+        if resp.status_code != 200:
+            raise Exception(resp.text)
+    else:
+        for thing in things:
+            service.things().create(thing)
 
 def assert_in_db(things: list[fsc.Thing]):
     frost_url = os.getenv("WIS2BOX_API_BACKEND_URL")
