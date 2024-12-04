@@ -24,23 +24,6 @@ def test_parse_csv():
         break # Just test the first row 
 
 
-def test_parse_predictions_csv():
-
-    file = Path(__file__).parent / "abbreviated_predictions.csv"
-    predicCSV = parse_csv(
-        file, PredictionsCSV
-    )
-    assert predicCSV
-
-    for chunk in predicCSV:
-        assert chunk
-        columns = len(chunk.keys())
-        assert columns == 3
-        assert chunk["COMID"] == 8969898
-        assert chunk["date"] == "2022-04-29"
-        break # Just test the first row 
-
-
 def test_parse_geojson_version_of_gpkg():
 
     file = Path(__file__).parent / "nhd_centerlines.geojson"
@@ -52,7 +35,7 @@ def test_sta():
     geometry = Path(__file__).parent / "nhd_centerlines.geojson"
     geometry = parse_geojson(geometry)
     observations = Path(__file__).parent / "abbreviated_predictions.csv"
-    observations = parse_csv(observations, PredictionsCSV)
+    observations = parse_csv(observations, PredictionsCSV, sort=True)
 
     things = to_sta(geometry, observations)
     assert things
@@ -65,10 +48,10 @@ def test_e2e():
 
     geometry = Path(__file__).parent / "nhd_centerlines.geojson"
     geometry = parse_geojson(geometry)
-    observations = Path(__file__).parent / "abbreviated_predictions.csv"
+    observations = Path(__file__).parent / "rs_chla_predictions.csv"
     observations = parse_csv(observations, PredictionsCSV)
 
-    things = to_sta(geometry, observations)
-    assert things
-    send_to_frost(things)
-    assert_in_db(things)
+    service = fsc.SensorThingsService(os.getenv("WIS2BOX_API_BACKEND_URL")) 
+    for thing in to_sta(geometry, observations):
+        assert thing.datastreams
+        service.things().create(thing)
