@@ -21,6 +21,7 @@
 
 __version__ = '0.6.dev1'
 
+from pathlib import Path
 import click
 import debugpy
 from wis2box import cli_helpers
@@ -28,6 +29,8 @@ import os
 import pytest
 
 from wis2box.api import remove_collection
+from wis2box.pitt.lib import parse_csv, parse_geojson, send_to_frost, to_sta
+from wis2box.pitt.types import PredictionsCSV
 
 
 @click.group()
@@ -69,7 +72,28 @@ def delete(ctx, verbosity):
     remove_collection("Things")
 
 
+@click.command(context_settings=dict(ignore_unknown_options=True))
+@click.pass_context
+@cli_helpers.OPTION_VERBOSITY
+@click.option('--csv', required=True, type=click.Path(exists=True))
+@click.option('--geojson', required=True, type=click.Path(exists=True))
+def load(ctx, verbosity, csv, geojson):
+    """Load and process an csv file of observations and an associated geojson, parsing and sending to Frost."""
+    csv = Path(csv)
+    geojson = Path(geojson)
+    observations = parse_csv(csv, PredictionsCSV)
+    geometry = parse_geojson(geojson)
+    things = to_sta(geometry, observations)
+    send_to_frost(things)
+    click.echo("Done")
 
+@click.command()
+def chdir():
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    os.chdir(dir_path)
+
+pitt.add_command(chdir)
+pitt.add_command(load)
 pitt.add_command(delete)
 pitt.add_command(test)
 pitt.add_command(test_debug)
