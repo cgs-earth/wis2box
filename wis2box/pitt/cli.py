@@ -21,14 +21,24 @@
 
 __version__ = '0.6.dev1'
 
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 import click
 import debugpy
+import httpx
 from wis2box import cli_helpers
 import os
 import pytest
+import requests
+import threading
 
 from wis2box.api import remove_collection
-
+from wis2box.pitt.lib import parse_csv, parse_geojson, post_to_things, to_sta
+from wis2box.pitt.types import PredictionsCSV
+from frost_sta_client import utils
+import json
+import frost_sta_client as fsc
+import queue
 
 @click.group()
 @click.version_option(version=__version__)
@@ -70,6 +80,24 @@ def delete(ctx, verbosity):
 
 
 
+@click.command()
+@click.pass_context
+@cli_helpers.OPTION_VERBOSITY
+def load_sample(ctx, verbosity):
+    """Load all pitt observations. Requires files to be mounted inside the container"""
+    geometry = Path(__file__).parent / "tests" / "nhd_centerlines.geojson"
+    geometry = parse_geojson(geometry)
+    observations = Path(__file__).parent / "tests" / "rs_chla_predictions.csv"
+    observations = parse_csv(observations, PredictionsCSV)
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        # Use the generator and submit tasks to the executor
+        for thing in to_sta(geometry, observations):
+            executor.submit(post_to_things, thing)
+
+        
+
+pitt.add_command(load_sample)
 pitt.add_command(delete)
 pitt.add_command(test)
 pitt.add_command(test_debug)

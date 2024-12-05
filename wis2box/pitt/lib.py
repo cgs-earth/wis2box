@@ -209,3 +209,24 @@ def assert_in_db(things: list[fsc.Thing]):
         # we use description since the name field returns the name of nativeid in the db
         # not the natural language description
         assert thing._description in existingThings
+
+
+def post_to_things(thing: fsc.Thing):
+    url = os.getenv("WIS2BOX_API_BACKEND_URL")
+    assert thing.datastreams
+    jsonVersion = utils.transform_entity_to_json_dict(thing)
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+    }
+    resp = requests.post(
+        f"{url}/Things",
+        json= jsonVersion,
+        headers= headers
+    )
+
+    if not resp.ok:
+        file_name = f"failed_{thing.id}.json"  # You can customize the filename
+        with open(file_name, 'w') as file:
+            file.write(json.dumps(jsonVersion))
+        raise Exception(resp.text)

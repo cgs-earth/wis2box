@@ -240,7 +240,7 @@ def load_data_into_frost(stations: list[int], begin: Optional[str], end: Optiona
     METADATA = {
         "id": THINGS_COLLECTION,
         "title": THINGS_COLLECTION,
-        "description": "Oregon Water Resource SensorThings",
+        "description": "SensorThings API Things",
         "keywords": ["thing", "oregon"],
         "links": [
             "https://gis.wrd.state.or.us/server/rest/services",
