@@ -54,6 +54,7 @@ commands = [
     'restart',
     'start',
     'start-dev',
+    'start-dev-d',
     'status',
     'stop',
     'up',
@@ -67,6 +68,7 @@ parser.add_argument('command',
     - build [containers]: build all services
     - start [containers]: start system
     - start-dev [containers]: start system in local development mode
+    - start-dev-d [containers]: start system in local development mode with detached shell
     - login [container]: login to the container (default: wis2box)
     - login-root [container]: login to the container as root
     - stop: stop [container] system
@@ -147,7 +149,7 @@ def make(args) -> None:
     elif args.command == "build":
         run(args, split(
             f'docker compose {DOCKER_COMPOSE_ARGS} build {containers}'))
-    elif args.command in ["up", "start", "start-dev"]:
+    elif args.command in ["up", "start", "start-dev", "start-dev-d"]:
         run(args, split(
             'docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions > /dev/null 2>&1'))
         run(args, split(
@@ -157,6 +159,8 @@ def make(args) -> None:
         else:
             if args.command == 'start-dev':
                 run(args, split(f'docker compose {DOCKER_COMPOSE_ARGS} --file docker/docker-compose.dev.yml up'))
+            elif args.command == 'dev-d':
+                run(args, split(f'docker compose {DOCKER_COMPOSE_ARGS} --file docker/docker-compose.dev.yml up -d'))
             else:
                 run(args, split(f'docker compose {DOCKER_COMPOSE_ARGS} up -d'))
     elif args.command == "execute":

@@ -14,6 +14,8 @@ from wis2box.oregon.odwr.types import (
     THINGS_COLLECTION,
 )
 
+import logging
+LOGGER = logging.getLogger(__name__)
 
 @click.command()
 @click.pass_context
@@ -36,6 +38,12 @@ def load(ctx, verbosity, stations: list[int] , begin: Optional[str] , end: Optio
 @click.option("--stations", "-s", default="all", help="station identifier", callback=lambda _,__,x: x.split(',') if x else [])
 def update(ctx, verbosity, stations: list[int]):
     """Update the data to include new data since the last crawl"""
+    from wis2box.oregon.odwr.helper_classes import metadata_file_path
+
+    if not metadata_file_path.exists():
+        LOGGER.error("No metadata file found! Skipping updates. Please create a metadata file first on run an initial crawl.")
+        return
+
     if stations == ["all"]:
         update_data(ALL_RELEVANT_STATIONS, None)
     else:
@@ -85,12 +93,24 @@ def test_debug(ctx, verbosity, pytest_args):
     test_dir = os.path.join(dir_path, "tests")
     pytest.main([test_dir, "-vvvx", *pytest_args])
 
+@click.command()
+@click.pass_context
+@cli_helpers.OPTION_VERBOSITY
+def setup_cron(ctx, verbosity):
+    """Sets up a cronjob to run the update command every minute. Gets rid of other cronjobs"""
+    cronjob = "* * * * * /usr/local/bin/wis2box oregon odwr update  > /proc/1/fd/1 2>/proc/1/fd/2"
+    os.system(f'crontab -l | grep "{cronjob}" || echo "{cronjob}" | crontab -')
+    # get the new value of the crontab
+    cronjob = os.popen('crontab -l').read()
+    click.echo("Cronjob set to:")
+    click.echo(cronjob)
 
 @click.group()
 def odwr():
     """Station metadata management for Oregon Water Resources"""
     pass
 
+odwr.add_command(setup_cron)
 odwr.add_command(publish)
 odwr.add_command(load)
 odwr.add_command(delete)

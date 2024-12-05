@@ -13,7 +13,7 @@ from wis2box.oregon.odwr.types import FrostBatchRequest, Observation
 
 LOGGER = logging.getLogger(__name__)
 
-metadata_file_path = Path("oregon_load_metadata.json")
+metadata_file_path = Path.home() / "oregon_load_metadata.json"
 
 @dataclass
 class UpdateMetadata():
@@ -42,12 +42,15 @@ class CrawlResultStore:
 
     def __init__(self):
         # check if metadata.json exists if not create it
-        if not metadata_file_path.exists():
-            save_metadata(UpdateMetadata("", "", [], []))
-        else: # if it exists, make sure the successes and failures are not left over from the previous crawl
-            metadata = load_metadata()
-            metadata.successes, metadata.failures = [], []
-            save_metadata(metadata)
+        try:
+            if not metadata_file_path.exists():
+                save_metadata(UpdateMetadata("", "", [], []))
+            else: # if it exists, make sure the successes and failures are not left over from the previous crawl
+                metadata = load_metadata()
+                metadata.successes, metadata.failures = [], []
+                save_metadata(metadata)
+        except PermissionError as p:
+            raise PermissionError(f"Unable to access {metadata_file_path.absolute()}: {p}")
 
     def get_range(self) -> Tuple[str, str]:
         """Get the range of data that has been downloaded"""

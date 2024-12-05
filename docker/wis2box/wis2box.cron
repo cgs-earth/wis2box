@@ -1,6 +1,3 @@
 50 23 * * * su wis2box -c "wis2box data archive" > /proc/1/fd/1 2>/proc/1/fd/2
 55 23 * * * su wis2box -c "wis2box data observation ingest" > /proc/1/fd/1 2>/proc/1/fd/2
 0 * * * * su wis2box -c "echo 'wis2box.cron is alive'" > /proc/1/fd/1 2>/proc/1/fd/2
-
-# Update the odwr data for Oregon every day
-0 0 * * * su wis2box -c "wis2box oregon odwr update"  > /proc/1/fd/1 2>/proc/1/fd/2
