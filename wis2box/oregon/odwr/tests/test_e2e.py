@@ -68,8 +68,9 @@ def test_load_partially_then_update():
 
     new_range = CrawlResultStore().get_range()
     assert new_range == ("01/01/2024 12:00:00 AM", update_time)
-    new_data= requests.get(f"{api_url}/collections/observations/items/158205")
-    assert new_data.status_code == 200, f"Status code: {new_data.status_code}, {new_data.text}"
+    url = f"{api_url}/collections/observations/items/158205"
+    new_data= requests.get(url)
+    assert new_data.status_code == 200, f"Status code for {url} was {new_data.status_code}"
     new_result: str = new_data.json()["properties"]["resultTime"]
     date = datetime.datetime.fromisoformat(new_result.replace("Z", "+00:00"))
     # make sure the date is within the last month; rough estimate. just making sure the update got new data
