@@ -90,11 +90,8 @@ def load_sample(ctx, verbosity):
     observations = Path(__file__).parent / "tests" / "rs_chla_predictions.csv"
     observations = parse_csv(observations, PredictionsCSV)
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        # Use the generator and submit tasks to the executor
-        for thing in to_sta(geometry, observations):
-            executor.submit(post_to_things, thing)
-
+    for thing in to_sta(geometry, observations):
+        post_to_things(thing)
         
 
 pitt.add_command(load_sample)

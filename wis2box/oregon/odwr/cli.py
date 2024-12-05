@@ -18,8 +18,8 @@ from wis2box.oregon.odwr.types import (
 @click.command()
 @click.pass_context
 @click.option("--stations", "-s", default="all", help="station identifier", callback=lambda _,__,x: x.split(',') if x else [])
-@click.option("--begin", "-b", help="data start date", type=str)
-@click.option("--end", "-e", help="data end date", type=str)
+@click.option("--begin", "-b", help="data start date in Oregon timezone", type=str)
+@click.option("--end", "-e", help="data end date in Oregon timezone", type=str)
 @cli_helpers.OPTION_VERBOSITY
 def load(ctx, verbosity, stations: list[int] , begin: Optional[str] , end: Optional[str]):
     """Loads stations into sensorthings backend"""

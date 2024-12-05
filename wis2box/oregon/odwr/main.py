@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import Coroutine, Optional, List
 import logging
 import concurrent.futures
+from zoneinfo import ZoneInfo
 import httpx
 import requests
 from wis2box.api import setup_collection, upsert_collection_item
@@ -118,9 +119,9 @@ class OregonStaRequestBuilder:
             no_stream_available = str(attr[stream]) != "1" or stream not in attr
             if no_stream_available:
                 continue
-
-            dummy_start = to_oregon_datetime(datetime.now())
-            dummy_end = to_oregon_datetime(datetime.now())
+            oregon_tz = ZoneInfo("America/Los_Angeles")
+            dummy_start = to_oregon_datetime(datetime.now(oregon_tz))
+            dummy_end = to_oregon_datetime(datetime.now(oregon_tz))
             tsv_url = generate_oregon_tsv_url(
                 stream, int(attr["station_nbr"]), dummy_start, dummy_end
             )
@@ -257,21 +258,22 @@ def load_data_into_frost(stations: list[int], begin: Optional[str], end: Optiona
     if not begin:
         begin = START_OF_DATA
     if not end:
-        end = to_oregon_datetime(datetime.now())
+        oregon_tz = ZoneInfo("America/Los_Angeles")
+        end = to_oregon_datetime(datetime.now(oregon_tz))
 
     metadata_store.update_range(begin, end)
 
     builder = OregonStaRequestBuilder(
         stations, data_start=begin, data_end=end
     )
-
-    start_time = datetime.now()
+    oregon_tz = ZoneInfo("America/Los_Angeles")
+    start_time = datetime.now(oregon_tz)
 
     async def main():
         await builder.send(metadata_store)
 
     asyncio.run(main())
-    end_time = datetime.now()
+    end_time = datetime.now(oregon_tz)
     duration = round((end_time - start_time).total_seconds() / 60, 3)
 
     LOGGER.info(
@@ -290,7 +292,8 @@ def update_data(stations: list[int], new_end: Optional[str]):
     )
 
     if not new_end:
-        new_end = to_oregon_datetime(datetime.now())
+        oregon_tz = ZoneInfo("America/Los_Angeles")
+        new_end = to_oregon_datetime(datetime.now(oregon_tz))
 
     builder = OregonStaRequestBuilder(
         relevant_stations=stations, data_start=new_start, data_end=new_end
