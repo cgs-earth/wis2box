@@ -4,6 +4,9 @@ from wis2box.pitt.types import InsituCSV, PredictionsCSV
 from pathlib import Path
 import logging
 import frost_sta_client as fsc
+import requests
+from frost_sta_client import utils 
+import json
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,6 +33,10 @@ def test_parse_geojson_version_of_gpkg():
     insitu_chla = parse_geojson(file)
     assert insitu_chla
 
+def test_can_ping_service():
+    resp = requests.get(os.getenv("WIS2BOX_API_BACKEND_URL"))
+    assert resp.ok
+
 def test_sta():
 
     geometry = Path(__file__).parent / "nhd_centerlines.geojson"
@@ -51,7 +58,27 @@ def test_e2e():
     observations = Path(__file__).parent / "rs_chla_predictions.csv"
     observations = parse_csv(observations, PredictionsCSV)
 
-    service = fsc.SensorThingsService(os.getenv("WIS2BOX_API_BACKEND_URL")) 
+    url = os.getenv("WIS2BOX_API_BACKEND_URL")
+    service = fsc.SensorThingsService(url) 
     for thing in to_sta(geometry, observations):
         assert thing.datastreams
-        service.things().create(thing)
+
+        jsonVersion = fsc.utils.transform_entity_to_json_dict(thing)
+        headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+        }
+        resp = requests.post(
+            f"{url}/Things",
+            json= jsonVersion,
+            headers= headers
+        )
+
+        if not resp.ok:
+            file_name = f"failed_{thing.id}.json"  # You can customize the filename
+            with open(file_name, 'w') as file:
+                file.write(json.dumps(jsonVersion))
+            raise Exception(resp.text)
+
+
+        # service.things().create(thing)
