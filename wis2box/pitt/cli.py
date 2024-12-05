@@ -29,7 +29,7 @@ import os
 import pytest
 
 from wis2box.api import remove_collection
-from wis2box.pitt.lib import parse_csv, parse_geojson, post_to_things, to_sta
+from wis2box.pitt.lib import parse_csv, parse_geojson, post_to_things, post_to_things_parallel, to_sta
 from wis2box.pitt.types import PredictionsCSV
 
 import logging
@@ -85,9 +85,7 @@ def load_sample(ctx, verbosity):
     observations = Path(__file__).parent / "tests" / "rs_chla_predictions.csv"
     observations = parse_csv(observations, PredictionsCSV)
 
-    for thing in to_sta(geometry, observations):
-        LOGGER.info(f"Posting {thing.name}")
-        post_to_things(thing)
+    post_to_things_parallel(to_sta, geometry, observations)
         
 
 # @click.command()

@@ -2,7 +2,7 @@ import json
 import os
 from pathlib import Path
 import re
-from typing import Generator, TypeVar, Type, Union
+from typing import Callable, Generator, TypeVar, Type, Union
 from attr import assoc
 import geojson.utils
 import pandas as pd
@@ -13,6 +13,9 @@ from wis2box.pitt.types import InsituCSV, PredictionsCSV
 import frost_sta_client as fsc
 import logging
 from frost_sta_client import utils 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from queue import Queue
+import threading
 
 LOGGER = logging.getLogger(__name__)
 
@@ -230,3 +233,40 @@ def post_to_things(thing: fsc.Thing):
         with open(file_name, 'w') as file:
             file.write(json.dumps(jsonVersion))
         raise Exception(resp.text)
+    
+
+def post_to_things_parallel(to_sta: Callable, geometry, observations: Generator[PredictionsCSV, None, None]):
+    """Parallelize post_to_things with limited memory usage."""
+    queue = Queue(maxsize=10)  # Limit the queue size to control memory usage
+
+    # Worker function to process queue items
+    def worker():
+        while True:
+            thing = queue.get()
+            if thing is None:  # Sentinel to terminate worker
+                break
+            try:
+                LOGGER.info(f"Posting {thing.name}")
+                post_to_things(thing)
+            finally:
+                queue.task_done()
+
+    MAX_THREADS = 8  # Number of worker threads
+    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+        # Start worker threads
+        for _ in range(MAX_THREADS):
+            executor.submit(worker)
+
+        # Produce and enqueue tasks dynamically
+        try:
+            for thing in to_sta(geometry, observations):
+                queue.put(thing)  # Blocks if the queue is full
+                LOGGER.info(f"Enqueued {thing.name}")
+        finally:
+            # Signal workers to terminate after all tasks are enqueued
+            for _ in range(MAX_THREADS):
+                queue.put(None)
+
+        # Wait for all worker threads to finish processing
+        queue.join()
+    LOGGER.info("All tasks completed")
