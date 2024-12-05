@@ -21,24 +21,19 @@
 
 __version__ = '0.6.dev1'
 
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import click
 import debugpy
-import httpx
 from wis2box import cli_helpers
 import os
 import pytest
-import requests
-import threading
 
 from wis2box.api import remove_collection
 from wis2box.pitt.lib import parse_csv, parse_geojson, post_to_things, to_sta
 from wis2box.pitt.types import PredictionsCSV
-from frost_sta_client import utils
-import json
-import frost_sta_client as fsc
-import queue
+
+import logging
+LOGGER = logging.getLogger(__name__)
 
 @click.group()
 @click.version_option(version=__version__)
@@ -91,6 +86,7 @@ def load_sample(ctx, verbosity):
     observations = parse_csv(observations, PredictionsCSV)
 
     for thing in to_sta(geometry, observations):
+        LOGGER.info(f"Posting {thing.name}")
         post_to_things(thing)
         
 
