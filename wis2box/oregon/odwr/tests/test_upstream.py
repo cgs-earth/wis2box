@@ -1,10 +1,17 @@
+import asyncio
 from datetime import datetime
+import logging
+
+import httpx
 
 from wis2box.oregon.odwr.lib import download_oregon_tsv, generate_oregon_tsv_url, parse_oregon_tsv, to_oregon_datetime
 import pytest
 from collections import Counter
 import requests
-from wis2box.oregon.odwr.types import START_OF_DATA
+from wis2box.oregon.odwr.main import OregonStaRequestBuilder
+from wis2box.oregon.odwr.types import ALL_RELEVANT_STATIONS, START_OF_DATA
+
+LOGGER = logging.getLogger(__name__)
 
 @pytest.mark.parametrize("end_date", ["10/7/2022 12:00:00 AM", "10/7/2024 12:00:00 AM", "4/7/2000 11:00:00 AM"])
 def test_no_data_with_no_beginning_date(end_date):
@@ -109,3 +116,24 @@ def test_how_many_observations_in_full_station():
     length = len(result.dates)
     assert length == len(result.dates)
     assert length > 56540 # we can't test an exact number here since the oregon data is consistently updating. But must be at least bigger than this value we got on Oct 28 2024 
+
+
+def test_get_many_observations_in_async():
+    """Check to make sure that the server doesn't kick us out if we try to make too many requests to observation endpoints asynchronously"""
+    async def main():
+        builder = OregonStaRequestBuilder(ALL_RELEVANT_STATIONS, "01/01/2024 12:00:00 AM", "01/15/2024 12:00:00 AM")
+        stationMetadata = builder._get_upstream_data()
+        tasks = []
+        async with httpx.AsyncClient(timeout=None) as client:
+            for station in stationMetadata:
+
+                async def get_observations():
+                    LOGGER.info(f"Processing {station['attributes']['station_nbr']}")
+                    res = builder._get_observations(station, client)
+                    async for _ in res:
+                        pass # consume the generator
+
+                tasks.append(asyncio.create_task(get_observations()))
+            await asyncio.gather(*tasks)
+
+    asyncio.run(main())

@@ -33,7 +33,16 @@ def oregon():
     """Oregon data management"""
     pass
 
+# @click.command()
+# def setup_caddy():
+#     """Setup caddy for oregon"""
+#     # copy the caddyfile from the current directory to /etc/caddy/Caddyfile and run systemctl restart caddy
+#     file = Path(__file__).parent / "Caddyfile"
+#     caddy = Path("/etc/caddy/Caddyfile")
+#     caddy.write_text(file.read_text())
+#     click.echo("Caddyfile updated")
 
+# oregon.add_command(setup_caddy)
 oregon.add_command(odwr)
 oregon.add_command(xlsx)
 

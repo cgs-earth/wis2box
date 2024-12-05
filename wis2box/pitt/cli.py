@@ -38,7 +38,7 @@ LOGGER = logging.getLogger(__name__)
 @click.group()
 @click.version_option(version=__version__)
 def pitt():
-    """Oregon data management"""
+    """pitt data management"""
     pass
 
 
@@ -90,6 +90,18 @@ def load_sample(ctx, verbosity):
         post_to_things(thing)
         
 
+# @click.command()
+# def setup_caddy():
+#     """Setup caddy for pitt"""
+#     file = Path(__file__).parent / "Caddyfile"
+#     caddy_dir = Path("/etc/caddy")
+#     caddy_dir.mkdir(parents=True, exist_ok=True)  # Create the directory if it doesn't exist
+#     caddy = caddy_dir / "Caddyfile"
+#     caddy.write_text(file.read_text())
+#     click.echo("Caddyfile updated at /etc/caddy/Caddyfile")
+
+
+# pitt.add_command(setup_caddy)
 pitt.add_command(load_sample)
 pitt.add_command(delete)
 pitt.add_command(test)

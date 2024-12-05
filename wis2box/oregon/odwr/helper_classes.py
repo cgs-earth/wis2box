@@ -52,6 +52,9 @@ class CrawlResultStore:
         except PermissionError as p:
             raise PermissionError(f"Unable to access {metadata_file_path.absolute()}: {p}")
 
+    def reset(self):
+        save_metadata(UpdateMetadata("", "", [], []))
+
     def get_range(self) -> Tuple[str, str]:
         """Get the range of data that has been downloaded"""
         metadata = load_metadata()

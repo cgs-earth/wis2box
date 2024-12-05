@@ -119,9 +119,8 @@ class OregonStaRequestBuilder:
             no_stream_available = str(attr[stream]) != "1" or stream not in attr
             if no_stream_available:
                 continue
-            oregon_tz = ZoneInfo("America/Los_Angeles")
-            dummy_start = to_oregon_datetime(datetime.now(oregon_tz))
-            dummy_end = to_oregon_datetime(datetime.now(oregon_tz))
+            dummy_start = to_oregon_datetime(datetime.now())
+            dummy_end = to_oregon_datetime(datetime.now())
             tsv_url = generate_oregon_tsv_url(
                 stream, int(attr["station_nbr"]), dummy_start, dummy_end
             )
@@ -258,22 +257,20 @@ def load_data_into_frost(stations: list[int], begin: Optional[str], end: Optiona
     if not begin:
         begin = START_OF_DATA
     if not end:
-        oregon_tz = ZoneInfo("America/Los_Angeles")
-        end = to_oregon_datetime(datetime.now(oregon_tz))
+        end = to_oregon_datetime(datetime.now())
 
     metadata_store.update_range(begin, end)
 
     builder = OregonStaRequestBuilder(
         stations, data_start=begin, data_end=end
     )
-    oregon_tz = ZoneInfo("America/Los_Angeles")
-    start_time = datetime.now(oregon_tz)
+    start_time = datetime.now()
 
     async def main():
         await builder.send(metadata_store)
 
     asyncio.run(main())
-    end_time = datetime.now(oregon_tz)
+    end_time = datetime.now()
     duration = round((end_time - start_time).total_seconds() / 60, 3)
 
     LOGGER.info(
@@ -284,16 +281,16 @@ def load_data_into_frost(stations: list[int], begin: Optional[str], end: Optiona
 def update_data(stations: list[int], new_end: Optional[str]):
     """Update the data in FROST"""
     metadata_store = CrawlResultStore()
-    _, end = metadata_store.get_range()
+    start, end = metadata_store.get_range()
     # make sure the start and end are valid dates
     assert_valid_date(end)
+    assert_valid_date(start)
     new_start = (
         end  # new start should be set to the previous end in order to only get new data
     )
 
-    if not new_end:
-        oregon_tz = ZoneInfo("America/Los_Angeles")
-        new_end = to_oregon_datetime(datetime.now(oregon_tz))
+    if not new_end: 
+        new_end = to_oregon_datetime(datetime.now())
 
     builder = OregonStaRequestBuilder(
         relevant_stations=stations, data_start=new_start, data_end=new_end
@@ -305,4 +302,4 @@ def update_data(stations: list[int], new_end: Optional[str]):
 
     asyncio.run(main())
 
-    metadata_store.update_range(new_start, new_end)
+    metadata_store.update_range(start, new_end)
