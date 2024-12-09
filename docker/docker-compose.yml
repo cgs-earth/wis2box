@@ -35,7 +35,7 @@ services:
       - api-config:/data/wis2box/config/pygeoapi/:rw
     depends_on:
       frost-http:
-        condition: service_started
+        condition: service_healthy
 
   minio:
     container_name: wis2box-minio
@@ -118,6 +118,11 @@ services:
     environment:
       - logSensitiveData=true
       # - FROST_LL=DEBUG # default is info. DEBUG causes log spam.
+    healthcheck:
+      test: curl --fail http://frost-http:8080/FROST-Server/v1.1/ || exit 1
+      interval: 5s
+      timeout: 1s
+      retries: 3
 
   frost-mqtt:
     container_name: frost-mqtt
