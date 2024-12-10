@@ -1,3 +1,5 @@
+from datetime import date
+import datetime
 import os
 from typing import Optional
 
@@ -6,6 +8,8 @@ import pytest
 import debugpy
 from wis2box import cli_helpers
 from wis2box.api import remove_collection, setup_collection
+from wis2box.oregon.odwr.helper_classes import UpdateMetadata, save_metadata
+from wis2box.oregon.odwr.lib import to_oregon_datetime
 from wis2box.oregon.odwr.main import load_data_into_frost, update_data
 from wis2box.oregon.odwr.types import (
     ALL_RELEVANT_STATIONS,
@@ -97,19 +101,30 @@ def test_debug(ctx, verbosity, pytest_args):
 @click.pass_context
 @cli_helpers.OPTION_VERBOSITY
 def setup_cron(ctx, verbosity):
-    """Sets up a cronjob to run the update command every minute. Gets rid of other cronjobs"""
-    cronjob = "* * * * * /usr/local/bin/wis2box oregon odwr update  > /proc/1/fd/1 2>/proc/1/fd/2"
+    """Sets up a cronjob to run the update command every day. Gets rid of other cronjobs"""
+    cronjob = "0 0 * * * /usr/local/bin/wis2box oregon odwr update  > /proc/1/fd/1 2>/proc/1/fd/2"
     os.system(f'crontab -l | grep "{cronjob}" || echo "{cronjob}" | crontab -')
     # get the new value of the crontab
     cronjob = os.popen('crontab -l').read()
     click.echo("Cronjob set to:")
     click.echo(cronjob)
 
+@click.command()
+@click.pass_context
+@cli_helpers.OPTION_VERBOSITY
+def generate_test_metadata(ctx, verbosity):
+    """Create a sample metadata file with dates in the Oregon format for testing purposes"""
+    start = to_oregon_datetime(datetime.datetime.now())
+    end = to_oregon_datetime(datetime.datetime.now())
+    metadata = UpdateMetadata(start, end, [], [])
+    save_metadata(metadata)
+
 @click.group()
 def odwr():
     """Station metadata management for Oregon Water Resources"""
     pass
 
+odwr.add_command(generate_test_metadata)
 odwr.add_command(setup_cron)
 odwr.add_command(publish)
 odwr.add_command(load)
