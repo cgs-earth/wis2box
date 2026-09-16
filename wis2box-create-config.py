@@ -38,7 +38,20 @@ if not WINDOWS:
     DOCKER_GROUP = grp.getgrnam('docker')
 
 OTHER_TLDS = ['org', 'int']
+HAS_TTY = True
 
+def get_input(default_: str)->str:
+    global HAS_TTY
+    try:
+        answer = input()
+    except EOFError as err:
+        HAS_TTY = False
+        if default_:
+            answer = default_
+        else:
+            raise err('TTY interface required')
+
+    return answer
 
 def get_country_name(country_code: str) -> str:
     """
@@ -115,7 +128,7 @@ def get_bounding_box(country_code: str) -> Tuple[str, str]:
     # ask the user to accept the bounding box or to enter a new one
     print(f'bounding box: {bounding_box}.')
     print('Do you want to use this bounding box? (y/n/exit)')
-    answer = input()
+    answer = get_input('y')
 
     while answer not in ['y', 'exit']:
         print('Please enter the bounding box as a comma-separated list of four numbers:') # noqa
@@ -125,7 +138,7 @@ def get_bounding_box(country_code: str) -> Tuple[str, str]:
         bounding_box = input()
         print(f'bounding box: {bounding_box}.')
         print('Do you want to use this bounding box? (y/n/exit)')
-        answer = input()
+        answer = get_input('y')
 
     if answer == 'exit':
         exit()
@@ -169,7 +182,7 @@ def get_tld_and_centre_id() -> Tuple[str, str]:
         print('Your TLD corresponds to: ')
         print(f'  {country_code} (country_name={country_name})')
         print('Is this correct? (y/n/exit)')
-        answer = input()
+        answer = get_input('y')
 
     answer = ''
     centre_id = ''
@@ -196,7 +209,7 @@ def get_tld_and_centre_id() -> Tuple[str, str]:
         print('The centre-id will be set to:')
         print(f'  {centre_id}')
         print('Is this correct? (y/n/exit)')
-        answer = input()
+        answer = get_input('y')
 
     return (country_code, centre_id)
 
@@ -237,7 +250,7 @@ def get_password(password_name: str) -> str:
             exit()
 
         print(f'Do you want to use a randomly generated password for {password_name} (y/n/exit)') # noqa
-        answer = input()
+        answer = get_input('y')
 
     if answer == 'y':
         password = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(8)) # noqa
@@ -266,7 +279,7 @@ def get_password(password_name: str) -> str:
 
         print(f'{password_name}={password}')
         print('Is this correct? (y/n/exit)')
-        answer = input()
+        answer = get_input('y')
 
     return f"{password_name}={password}\n"
 
@@ -292,8 +305,7 @@ def get_wis2box_url() -> str:
 
         # check if the URL starts with http:// or https://
         # if not, ask the user to enter the URL again
-        wis2box_url = ''
-        wis2box_url = input()
+        wis2box_url = get_input('http://localhost')
 
         while not wis2box_url.startswith(('http://', 'https://')):
             print('The URL must start with http:// or https://')
@@ -304,7 +316,7 @@ def get_wis2box_url() -> str:
         print('The URL of the wis2box will be set to:')
         print(f'  {wis2box_url}')
         print('Is this correct? (y/n/exit)')
-        answer = input()
+        answer = get_input('y')
 
     return wis2box_url
 
@@ -352,6 +364,10 @@ def create_wis2box_env(host_datadir: str) -> None:
     """
 
     wis2box_env = Path('wis2box.env')
+
+    if not HAS_TTY or os.getenv('WIS2BOX_HOST_DIR'):
+        DIR = os.getenv('WIS2BOX_HOST_DIR')
+        host_datadir = f'{DIR}/{host_datadir}'
 
     with wis2box_env.open('w') as fh:
         fh.write('# directory on the host with wis2box-configuration\n') # noqa
@@ -451,7 +467,7 @@ def create_host_datadir() -> str:
             exit()
 
         print("Please enter the directory to be used for WIS2BOX_HOST_DATADIR:") # noqa
-        host_datadir = input()
+        host_datadir = get_input('data')
 
         if host_datadir == "":
             print("The directory cannot be empty.")
@@ -460,7 +476,7 @@ def create_host_datadir() -> str:
         print("The directory to be used for WIS2BOX_HOST_DATADIR will be set to:") # noqa
         print(f"    {host_datadir}")
         print("Is this correct? (y/n/exit)")
-        answer = input()
+        answer = get_input('y')
 
     # check if the directory exists
     try:
@@ -582,7 +598,7 @@ def create_metadata_files(host_datadir: str, country_code: str,
         print("The email address of the wis2box administrator will be set to:") # noqa
         print(f"    {wis2box_email}")
         print("Is this correct? (y/n/exit)")
-        answer = input()
+        answer = get_input('y')
 
     # ask for the name of the centre
     answer = ""
@@ -595,7 +611,7 @@ def create_metadata_files(host_datadir: str, country_code: str,
         print("The organization name will be set to:")
         print(f"    {centre_name}")
         print("Is this correct? (y/n/exit)")
-        answer = input()
+        answer = get_input('y')
 
     # get an initial bounding box for the country
     country_name, bounding_box = get_bounding_box(country_code)
@@ -689,7 +705,7 @@ def main():
     if dev_env.is_file():
         print("The file wis2box.env already exists in the current directory.")
         print("Do you want to recreate wis2box.env? (y/n/exit)")
-        answer = input()
+        answer = get_input('y')
 
         if answer == "y":
             os.remove("wis2box.env")
